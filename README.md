@@ -1,12 +1,12 @@
-# **XmlWiz Converter**
+# **XML Wizard Converter**
 
-## This project is currently in its intial stages of development and prototyping
+## This project is currently in its initial stages of development and prototyping
 
-This repository contains python code for converting XML to Jsonl, Parquet and Apache Arrow objects.
+This repository contains python code for converting XML to JSON, Parquet and Apache Arrow.
 
 # Key Features
 
-Converts XML to valid Jsonl, Parquet or Apache Arrow objects.\
+Converts XML to valid JSON, Parquet or Apache Arrow objects.\
 Requires only two files to get started. Your XML file and the XSD schema file for that XML file.\
 Multiprocessing enabled to parse XML files concurrently if the XML files are in the same format. Call with -m # option.\
 Uses Python's iterparse event based methods which enables parsing very large files with low memory requirements.\

@@ -1,7 +1,7 @@
 [project]
 name = "xmlwiz"
 version = "0.1.0"
-description = "Add your description here"
+description = "XML Wizard package and tool for converting XML into Json, Parquet and Apache Arrow."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
