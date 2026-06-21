@@ -1,71 +1,44 @@
-import unittest
 import json
 import os
 import tempfile
+import pytest
+from xmlwiz.convert_xml import parse_file
 
-from xml_to_json.convert_xml_to_json import parse_file
+def test_json(snapshot):
 
+    realpath = os.path.dirname(os.path.realpath(__file__))
 
-class MyTest(unittest.TestCase):
+    input_file = os.path.join(realpath, "data", "PurchaseOrder.xml")
+    output_file = os.path.join(tempfile.gettempdir(), "PurchaseOrder.json")
+    xsd_file = os.path.join(realpath, "data", "PurchaseOrder.xsd")
+    output_format = "json"
+    zip = False
+    xpath = None
 
-    def test_json(self):
+    parse_file(input_file, output_file, xsd_file, output_format, zip, xpath)
+    with open(output_file) as f:
+        target_json = json.loads(f.read())
+    os.remove(output_file)
+    assert target_json == snapshot
 
-        realpath = os.path.dirname(os.path.realpath(__file__))
+def test_jsonl(snapshot):
 
-        input_file = os.path.join(realpath, "PurchaseOrder.xml")
-        output_file = os.path.join(tempfile.gettempdir(), "PurchaseOrder.json")
-        xsd_file = os.path.join(realpath, "PurchaseOrder.xsd")
-        output_format = "json"
-        zip = False
-        xpath = None
-        attribpaths = None
-        excludepaths = None
+    realpath = os.path.dirname(os.path.realpath(__file__))
 
-        parse_file(input_file, output_file, xsd_file, output_format, zip, xpath, attribpaths, excludepaths)
-        with open(os.path.join(realpath,"PurchaseOrder.json")) as f:
-            test_json = json.loads(f.read())
-        with open(output_file) as f:
-            target_json = json.loads(f.read())
-        os.remove(output_file)
-        print("Original")
-        print("=================================")
-        print(test_json)
-        print("Test")
-        print("=================================")
-        print(target_json)
-        self.assertEqual(target_json, test_json)
+    input_file = os.path.join(realpath, "data", "PurchaseOrder.xml")
+    output_file = os.path.join(tempfile.gettempdir(), "PurchaseOrder.jsonl")
+    xsd_file = os.path.join(realpath, "data", "PurchaseOrder.xsd")
+    output_format = "jsonl"
+    zip = False
+    xpath = "/purchaseOrder/items/item"
 
-    def test_jsonl(self):
+    test_json = list()
+    target_json = list()
 
-        realpath = os.path.dirname(os.path.realpath(__file__))
+    parse_file(input_file, output_file, xsd_file, output_format, zip, xpath)
+    with open(output_file) as f:
+        for line in f:
+            target_json.append(json.loads(line))
+    os.remove(output_file)
+    assert target_json == snapshot
 
-        input_file = os.path.join(realpath, "PurchaseOrder.xml")
-        output_file = os.path.join(tempfile.gettempdir(), "PurchaseOrder.jsonl")
-        xsd_file = os.path.join(realpath, "PurchaseOrder.xsd")
-        output_format = "jsonl"
-        zip = False
-        xpath = "/purchaseOrder/items/item"
-        attribpaths = None
-        excludepaths = None
-
-        test_json = list()
-        target_json = list()
-
-        parse_file(input_file, output_file, xsd_file, output_format, zip, xpath, attribpaths, excludepaths)
-        with open(os.path.join(realpath, "PurchaseOrder.jsonl")) as f:
-            for line in f:
-                test_json.append(json.loads(line))
-        with open(output_file) as f:
-            for line in f:
-                target_json.append(json.loads(line))
-        os.remove(output_file)
-        print("Original")
-        print("=================================")
-        print(test_json)
-        print("Test")
-        print("=================================")
-        print(target_json)
-        self.assertEqual(target_json, test_json)
-
-if __name__ == '__main__':
-    unittest.main()

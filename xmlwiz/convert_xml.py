@@ -94,7 +94,7 @@ def parse_xml(xml_file, lazy, json_file, xml_schema, xpath, xpath_items, output_
     return processed
 
 
-def parse_file(input_file, output_file, xsd_file, output_format, zip, xpath, target_path, delete_xml):
+def parse_file(input_file, output_file, xsd_file, output_format, zip, xpath, target_path=None, delete_xml=False):
     """
     :param input_file: input file
     :param output_file: output file
