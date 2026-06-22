@@ -219,7 +219,7 @@ def write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output
         return processed
 
 
-def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processed, rows_per_batch=100):
+def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processed, rows_per_batch=1000):
 
     _logger.info("Generating schema from " + xsd_file)
 
