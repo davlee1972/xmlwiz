@@ -20,7 +20,7 @@ python xml_to_json.py
 
 # Parameters
 ```python
-usage: xml_to_json.py [-h] -x XSD_FILE [-o OUTPUT_FORMAT]
+usage: xml_wiz.py [-h] -x XSD_FILE [-o OUTPUT_FORMAT]
                       [-t TARGET_PATH] [-z] [-p XPATH] 
                       [-m MULTI] [-l LOG] [-v VERBOSE] [-n]
                       ...
@@ -35,11 +35,9 @@ optional arguments:
   -x XSD_FILE, --xsd_file XSD_FILE
                         xsd file name
   -o OUTPUT_FORMAT, --output_format OUTPUT_FORMAT
-                        output format json or jsonl. Default is jsonl.
+                        output format jsonl, jsonl or parquet. Default is jsonl.
   -t TARGET_PATH, --target_path TARGET_PATH
-                        target path. hdfs targets require hadoop client
-                        installation. Examples: /proj/test, hdfs:///proj/test,
-                        hdfs://hdfsserver/proj/test
+                        target directory.
   -z, --zip             gzip output file
   -p XPATH, --xpath XPATH
                         xpath to parse out.
@@ -52,19 +50,28 @@ optional arguments:
 
 ```
 
-# Convert a small XML file to a JSON file
-```python
-python xml_to_json.py -x PurchaseOrder.xsd PurchaseOrder.xml
-
-INFO - 2018-03-20 11:10:24 - Parsing XML Files..
-INFO - 2018-03-20 11:10:24 - Processing 1 files
-INFO - 2018-03-20 11:10:24 - Parsing files in the following order:
-INFO - 2018-03-20 11:10:24 - ['PurchaseOrder.xml']
-DEBUG - 2018-03-20 11:10:24 - Generating schema from PurchaseOrder.xsd
-DEBUG - 2018-03-20 11:10:24 - Parsing PurchaseOrder.xml
-DEBUG - 2018-03-20 11:10:24 - Writing to file PurchaseOrder.json
-DEBUG - 2018-03-20 11:10:24 - Completed PurchaseOrder.xml
+# Convert a small XML file to a JSONL file
+```shell
+python xml_wiz.py -x PurchaseOrder.xsd PurchaseOrder.xml
+INFO - 2026-06-21 18:28:12 - Parsing XML Files..
+INFO - 2026-06-21 18:28:12 - Processing 1 files
+INFO - 2026-06-21 18:28:12 - Generating schema from PurchaseOrder.xsd
+INFO - 2026-06-21 18:28:12 - Parsing PurchaseOrder.xml
+INFO - 2026-06-21 18:28:12 - Writing to file PurchaseOrder.jsonl
+INFO - 2026-06-21 18:28:12 - Completed PurchaseOrder.xml
 ```
+
+# Convert a small XML file to a Parquet file
+```shell
+python xml_wiz.py -o parquet -x PurchaseOrder.xsd PurchaseOrder.xml
+INFO - 2026-06-21 18:30:03 - Parsing XML Files..
+INFO - 2026-06-21 18:30:03 - Processing 1 files
+INFO - 2026-06-21 18:28:12 - Generating schema from PurchaseOrder.xsd
+INFO - 2026-06-21 18:30:03 - Parsing PurchaseOrder.xml
+INFO - 2026-06-21 18:30:03 - Writing to file PurchaseOrder.parquet
+INFO - 2026-06-21 18:30:03 - Completed PurchaseOrder.xml
+```
+
 Original XML
 ```xml
 <?xml version="1.0"?>
@@ -148,19 +155,17 @@ https://learn.microsoft.com/en-us/visualstudio/xml-tools/sample-xsd-file-simple-
 # Convert an entire directory of XML files to JSONL
 Also zip output files, parse 3 files concurrently, only extract /PurchaseOrder/items/item elements and incrementally
 process one XML path at a time to save memory instead of trying to read the entire XML file into memory.
-```python
+```shell
 cp PurchaseOrder.xml 1.xml
-cp 1.xml 2.xml
-cp 1.xml 3.xml
-cp 1.xml 4.xml
+cp PurchaseOrder.xml 2.xml
 
-python xml_to_json.py -o jsonl -m 3 -z -p /purchaseOrder/items/item -x PurchaseOrder.xsd *.xml
+python xml_wiz.py -m 2 -z -p /purchaseOrder/items/item -x PurchaseOrder.xsd *.xml
 
-INFO - 2018-03-20 16:33:50 - Parsing XML Files..
-INFO - 2018-03-20 16:33:50 - Processing 5 files
-INFO - 2018-03-20 16:33:50 - Parsing files in the following order:
-INFO - 2018-03-20 16:33:50 - ['1.xml', '2.xml', 'PurchaseOrder.xml', '4.xml', '3.xml']
-DEBUG - 2018-03-20 16:33:50 - Generating schema from PurchaseOrder.xsd
+INFO - 2026-06-21 18:33:28 - Parsing XML Files..
+INFO - 2026-06-21 18:33:29 - Processing 3 files
+INFO - 2026-06-21 18:33:29 - Parsing files in the following order:
+INFO - 2026-06-21 18:33:29 - ['PurchaseOrder.xml', '1.xml', '2.xml']
+
 DEBUG - 2018-03-20 16:33:50 - Generating schema from PurchaseOrder.xsd
 DEBUG - 2018-03-20 16:33:50 - Generating schema from PurchaseOrder.xsd
 DEBUG - 2018-03-20 16:33:50 - Parsing PurchaseOrder.xml
