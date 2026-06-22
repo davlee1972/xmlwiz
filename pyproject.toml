@@ -1,7 +1,19 @@
 [project]
 name = "xmlwiz"
 version = "0.1.0"
-description = "Add your description here"
+description = "XML Wizard package and tool for converting XML into Json, Parquet and Apache Arrow."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "pyarrow>=24.0.0",
+    "xmlschema>=4.3.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "syrupy>=5.3.2",
+]
