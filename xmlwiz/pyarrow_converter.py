@@ -8,6 +8,7 @@
 # @author Davide Brunato <brunato@sissa.it>
 #
 from datetime import datetime
+import isodate
 
 from xmlschema.converters import ColumnarConverter
 
@@ -52,9 +53,16 @@ class PyArrowConverter(ColumnarConverter):
             result_dict = self.dict_class()
 
         if xsd_type.simple_type is not None:
-            #print(dir(xsd_type))
             if xsd_type.local_name == "date":
                 result_dict[xsd_element.local_name] = datetime.strptime(data.text, "%Y-%m-%d").date()
+            elif xsd_type.local_name == "dateTime":
+                result_dict[xsd_element.local_name] = datetime.fromisoformat(data.text)
+            elif xsd_type.local_name == "duration":
+                dur = isodate.parse_duration(data.text)
+                microseconds = int(dur.total_seconds() * 1_000_000)
+                result_dict[xsd_element.local_name] = microseconds
+            elif xsd_type.local_name == "time":
+                result_dict[xsd_element.local_name] = datetime.strptime(data.text, "%H:%M:%S%z").time()
             else:
                 result_dict[xsd_element.local_name] = data.text
 

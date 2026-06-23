@@ -46,9 +46,6 @@ def json_decoder(obj):
 
 def map_xsd_type_to_arrow(xsd_type):
 
-    if hasattr(xsd_type, "base_type") and xsd_type.base_type:
-        xsd_type = xsd_type.base_type
-    
     # Core mapping dictionary
     XSD_TO_PYARROW = {
         # Signed Integers
@@ -83,9 +80,10 @@ def map_xsd_type_to_arrow(xsd_type):
         "NCName": pa.string(),
         "NMTOKEN": pa.string(),
         "ID": pa.string(),
+        "IDREF": pa.string(),
         "anyURI": pa.string(),
         "QName": pa.string(),
-        
+
         # Binary
         "hexBinary": pa.binary(),
         "base64Binary": pa.binary(),
@@ -99,6 +97,12 @@ def map_xsd_type_to_arrow(xsd_type):
         "dateTime": pa.timestamp("us"),
         "duration": pa.duration("us"),
     }
+
+    if hasattr(xsd_type, "base_type") and xsd_type.base_type:
+        if xsd_type.base_type.is_list():
+            return pa.list_(XSD_TO_PYARROW.get(xsd_type.base_type.item_type.local_name, pa.string()))
+        else:
+            xsd_type = xsd_type.base_type
 
     return XSD_TO_PYARROW.get(xsd_type.local_name, pa.string())  # Fallback to string for unknown primitives
 
