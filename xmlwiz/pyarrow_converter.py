@@ -76,18 +76,12 @@ class PyArrowConverter(ColumnarConverter):
                 else:
                     if xsd_child.type is not None and xsd_child.type.simple_type is not None \
                             and not xsd_child.attributes:
-                        if len(xsd_element.findall('*')) == 1:
-                            try:
-                                result_dict.append(list(value.values())[0])
-                            except AttributeError:
-                                result_dict = self.list_class(value.values())
-                        else:
-                            try:
-                                result_dict[name].append(list(value.values())[0])
-                            except KeyError:
-                                result_dict[name] = self.list_class(value.values())
-                            except AttributeError:
-                                result_dict[name] = self.list_class(value.values())
+                        try:
+                            result_dict[name].append(list(value.values())[0])
+                        except KeyError:
+                            result_dict[name] = self.list_class(value.values())
+                        except AttributeError:
+                            result_dict[name] = self.list_class(value.values())
                     else:
                         try:
                             result_dict[name].append(value)

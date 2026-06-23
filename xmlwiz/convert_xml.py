@@ -45,74 +45,99 @@ def json_decoder(obj):
 
 
 def map_xsd_type_to_arrow(xsd_type):
+
+    if hasattr(xsd_type, "base_type") and xsd_type.base_type:
+        xsd_type = xsd_type.base_type
     
-    local_name = xsd_type.primitive_type.local_name
-    
-    mapping = {
-        'string': pa.string(),
-        'normalizedString': pa.string(),
-        'token': pa.string(),
-        'int': pa.int32(),
-        'integer': pa.int64(),
-        'long': pa.int64(),
-        'short': pa.int16(),
-        'byte': pa.int8(),
-        'unsignedInt': pa.uint32(),
-        'unsignedLong': pa.uint64(),
-        'unsignedShort': pa.uint16(),
-        'unsignedByte': pa.uint8(),
-        'float': pa.float32(),
-        'double': pa.float64(),
-        'decimal': pa.decimal128(38, 10), # Precision and scale can be adjusted
-        'boolean': pa.bool_(),
-        'date': pa.date32(),
-        'dateTime': pa.timestamp('ms'),
-        'time': pa.time32('ms'),
-        'base64Binary': pa.binary(),
-        'hexBinary': pa.binary(),
+    # Core mapping dictionary
+    XSD_TO_PYARROW = {
+        # Signed Integers
+        "byte": pa.int8(),
+        "short": pa.int16(),
+        "int": pa.int32(),
+        "long": pa.int64(),
+        "integer": pa.int64(),
+        
+        # Unsigned Integers
+        "unsignedByte": pa.uint8(),
+        "unsignedShort": pa.uint16(),
+        "unsignedInt": pa.uint32(),
+        "unsignedLong": pa.uint64(),
+        
+        # Special Constrained Integers (Mapped to standard physical types)
+        "positiveInteger": pa.uint64(),      # Constraint: >= 1
+        "nonNegativeInteger": pa.uint64(),   # Constraint: >= 0
+        "negativeInteger": pa.int64(),       # Constraint: <= -1
+        "nonPositiveInteger": pa.int64(),    # Constraint: <= 0
+        
+        # Floats & Decimals
+        "float": pa.float32(),
+        "double": pa.float64(),
+        "decimal": pa.decimal128(38, 10),    # Defaulting to a standard precision/scale
+        
+        # Strings & Identifiers
+        "string": pa.string(),
+        "normalizedString": pa.string(),
+        "token": pa.string(),
+        "Name": pa.string(),
+        "NCName": pa.string(),
+        "NMTOKEN": pa.string(),
+        "ID": pa.string(),
+        "anyURI": pa.string(),
+        "QName": pa.string(),
+        
+        # Binary
+        "hexBinary": pa.binary(),
+        "base64Binary": pa.binary(),
+        
+        # Boolean
+        "boolean": pa.bool_(),
+        
+        # Temporal (Defaulting to standard microsecond resolution)
+        "date": pa.date32(),
+        "time": pa.time64("us"),
+        "dateTime": pa.timestamp("us"),
+        "duration": pa.duration("us"),
     }
-    
-    return mapping.get(local_name, pa.string())  # Fallback to string for unknown primitives
+
+    return XSD_TO_PYARROW.get(xsd_type.local_name, pa.string())  # Fallback to string for unknown primitives
 
 
-def xsd_element_to_arrow_field(element, root=False):
+def xsd_element_to_arrow_field(xsd_element):
     """Recursively processes an XSD element node into a PyArrow Field."""
-    name = element.local_name
-    
-    # Check if the element contains nested children (complex type)
-    if element.type.has_complex_content() or element.type.is_complex():
-        fields = []
-        
-        # Process attributes of this element as fields
-        for attr_name, attr in element.type.attributes.items():
-            if attr_name is not None:
-                attr_type = map_xsd_type_to_arrow(attr.type)
-                # Prefix attributes with '@' to follow common XML-to-JSON/Dict conventions
-                fields.append(pa.field(attr_name, attr_type, nullable=True))
-        
-        # Process nested elements
-        for child in element.type.content.iter_elements():
-            child_field = xsd_element_to_arrow_field(child)
-            
-            # If the element can occur multiple times, wrap it in an Arrow List
-            if child.max_occurs is None or child.max_occurs > 1:
-                list_type = pa.list_(child_field.type)
-                fields.append(pa.field(child.local_name, list_type, nullable=True))
-            else:
-                fields.append(child_field)
-                
-        # Struct type holds the compiled complex structure
-        arrow_type = pa.struct(fields)
-    else:
-        # Simple types map directly to primitive types
-        arrow_type = map_xsd_type_to_arrow(element.type)
-        
-    if root:
-        nullable = True
-    else:
-        nullable = element.min_occurs == 0
 
-    return pa.field(name, arrow_type, nullable=nullable)
+    result_dict = {}
+
+    if hasattr(xsd_element, "attributes"):
+        result_dict = {xsd_element.local_name + attr_name: (map_xsd_type_to_arrow(attr.type), True) for attr_name, attr in xsd_element.attributes.items()}
+
+    # Check if the element contains nested children (complex type)
+    if xsd_element.type.simple_type is not None:
+        nullable = xsd_element.min_occurs == 0
+        result_dict[xsd_element.local_name] = (map_xsd_type_to_arrow(xsd_element.type), nullable)
+
+    if hasattr(xsd_element.type, "content") and hasattr(xsd_element.type.content, "iter_elements"):
+        for xsd_child in xsd_element.type.content.iter_elements():
+            name = xsd_child.local_name
+            child_type = xsd_element_to_arrow_field(xsd_child)
+
+            if xsd_child.is_single():
+                if xsd_child.type is not None and xsd_child.type.simple_type is not None:
+                    for i in range(child_type.num_fields):
+                        field = child_type.field(i)
+                        result_dict[field.name] = (field.type, field.nullable)
+                else:
+                    child_nullable = xsd_child.min_occurs == 0
+                    result_dict[name] = (child_type, child_nullable)
+            else:
+                if xsd_child.type is not None and xsd_child.type.simple_type is not None and not xsd_child.attributes:
+                    result_dict[name] = (pa.list_(child_type.field(0).type), True)
+                else:
+                    result_dict[name] = (pa.list_(child_type), True)
+
+    result_dict = pa.struct([pa.field(k, v[0], nullable=v[1]) for k, v in result_dict.items()])
+
+    return result_dict
 
 
 def convert_xml_schema_to_pyarrow_schema(schema, path=None):
@@ -122,13 +147,16 @@ def convert_xml_schema_to_pyarrow_schema(schema, path=None):
     # Process each top-level root element defined in the XML schema
     if path:
         xsd_elem = schema.find(path)
-        parent_field = xsd_element_to_arrow_field(xsd_elem)
-        child_fields = parent_field.flatten()
-        arrow_fields = [pa.field(field.name.removeprefix(parent_field.name + "."), field.type) for field in child_fields]
+        pa_type = xsd_element_to_arrow_field(xsd_elem)
+        arrow_fields = [
+            pa.field(sub.name, sub.type, nullable=sub.nullable)
+                for sub in pa_type
+        ]
     else:
+        arrow_fields=[]
         for name, element in schema.elements.items():
-            field = xsd_element_to_arrow_field(element, True)
-            arrow_fields.append(field)
+            pa_type = xsd_element_to_arrow_field(element)
+            arrow_fields.append(pa.field(name, pa_type, nullable=True))
 
     return pa.schema(arrow_fields)
 
@@ -148,7 +176,7 @@ def write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output
 
     _logger.info("Generating schema from " + xsd_file)
 
-    xml_schema = xmlschema.XMLSchema(xsd_file, converter=ColumnarConverter)
+    xml_schema = xmlschema.XMLSchema11(xsd_file, converter=ColumnarConverter)
 
     _logger.info("Parsing " + input_file)
 
@@ -363,6 +391,7 @@ def convert_xml(xsd_file=None, output_format="jsonl", target_path=None, zip=Fals
 
     formatter = logging.Formatter("%(levelname)s - %(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
+    _logger.handlers.clear()
     ch = logging.StreamHandler()
     ch.setFormatter(formatter)
     ch.setLevel(logging.getLevelName(verbose))
