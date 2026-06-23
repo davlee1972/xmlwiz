@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://example.com"
+           xmlns="https://example.com"
+           elementFormDefault="qualified">
+
+  <!-- Root testing container -->
+  <xs:element name="TestingSuite">
+    <xs:complexType>
+      <xs:sequence>
+        
+        <!-- =================================================== -->
+        <!-- 1. STRING AND TEXT DERIVATIVES                      -->
+        <!-- =================================================== -->
+        <xs:element name="Strings">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="stringType" type="xs:string"/>
+              <xs:element name="normalizedStringType" type="xs:normalizedString"/>
+              <xs:element name="tokenType" type="xs:token"/>
+              <xs:element name="languageType" type="xs:language"/>
+              <xs:element name="NameType" type="xs:Name"/>
+              <xs:element name="NCNameType" type="xs:NCName"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- =================================================== -->
+        <!-- 2. NUMERIC DATA TYPES (FLOATS AND DECIMALS)         -->
+        <!-- =================================================== -->
+        <xs:element name="Numerics">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="decimalType" type="xs:decimal"/>
+              <xs:element name="floatType" type="xs:float"/>
+              <xs:element name="doubleType" type="xs:double"/>
+              <xs:element name="booleanType" type="xs:boolean"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- =================================================== -->
+        <!-- 3. INTEGER DATA TYPES HIERARCHY                     -->
+        <!-- =================================================== -->
+        <xs:element name="Integers">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="integerType" type="xs:integer"/>
+              <xs:element name="nonPositiveIntegerType" type="xs:nonPositiveInteger"/>
+              <xs:element name="negativeIntegerType" type="xs:negativeInteger"/>
+              <xs:element name="longType" type="xs:long"/>
+              <xs:element name="intType" type="xs:int"/>
+              <xs:element name="shortType" type="xs:short"/>
+              <xs:element name="byteType" type="xs:byte"/>
+              <xs:element name="nonNegativeIntegerType" type="xs:nonNegativeInteger"/>
+              <xs:element name="unsignedLongType" type="xs:unsignedLong"/>
+              <xs:element name="unsignedIntType" type="xs:unsignedInt"/>
+              <xs:element name="unsignedShortType" type="xs:unsignedShort"/>
+              <xs:element name="unsignedByteType" type="xs:unsignedByte"/>
+              <xs:element name="positiveIntegerType" type="xs:positiveInteger"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+
+        <!-- =================================================== -->
+        <!-- 4. DATE, TIME, AND DURATION TYPES                   -->
+        <!-- =================================================== -->
+        <xs:element name="DatesAndTimes">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="durationType" type="xs:duration"/>
+              <xs:element name="dateTimeType" type="xs:dateTime"/>
+              <xs:element name="timeType" type="xs:time"/>
+              <xs:element name="dateType" type="xs:date"/>
+              <xs:element name="gYearMonthType" type="xs:gYearMonth"/>
+              <xs:element name="gYearType" type="xs:gYear"/>
+              <xs:element name="gMonthDayType" type="xs:gMonthDay"/>
+              <xs:element name="gDayType" type="xs:gDay"/>
+              <xs:element name="gMonthType" type="xs:gMonth"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+
+        <!-- =================================================== -->
+        <!-- 5. BINARY DATA TYPES                                -->
+        <!-- =================================================== -->
+        <xs:element name="BinaryData">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="hexBinaryType" type="xs:hexBinary"/>
+              <xs:element name="base64BinaryType" type="xs:base64Binary"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- =================================================== -->
+        <!-- 6. ADVANCED XML IDENTIFIERS AND SYSTEM TOKENS       -->
+        <!-- =================================================== -->
+        <xs:element name="XmlIdentifiers">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="anyURIType" type="xs:anyURI"/>
+              <xs:element name="QNameType" type="xs:QName"/>
+              <xs:element name="nmtokenType" type="xs:NMTOKEN"/>
+              <xs:element name="nmtokensType" type="xs:NMTOKENS"/>
+              <xs:element name="IdTarget">
+                <xs:complexType>
+                  <xs:simpleContent>
+                    <xs:extension base="xs:string">
+                      <xs:attribute name="idAttr" type="xs:ID" use="required"/>
+                    </xs:extension>
+                  </xs:simpleContent>
+                </xs:complexType>
+              </xs:element>
+              <xs:element name="IdReference">
+                <xs:complexType>
+                  <xs:simpleContent>
+                    <xs:extension base="xs:string">
+                      <xs:attribute name="refAttr" type="xs:IDREF" use="required"/>
+                      <xs:attribute name="refsAttr" type="xs:IDREFS" use="required"/>
+                    </xs:extension>
+                  </xs:simpleContent>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

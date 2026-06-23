@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TestingSuite xmlns="https://example.com"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:schemaLocation="https://example.com schema.xsd">
+
+  <!-- testing call -->
+  <!-- python xml_wiz.py -t . -x .\test\data\testing_example.xsd .\test\data\testing_example.xml -->
+
+  <!-- 1. STRING AND TEXT DERIVATIVES -->
+  <Strings>
+    <stringType>Standard text string with line breaks and tabs.</stringType>
+    <normalizedStringType>Text string where tabs, line feeds, and returns are converted to spaces.</normalizedStringType>
+    <tokenType>Text with collapsed spaces and no leading/trailing whitespace.</tokenType>
+    <languageType>en-US</languageType>
+    <NameType>Valid_XML_Name.123</NameType>
+    <NCNameType>NonColonizedName</NCNameType>
+  </Strings>
+
+  <!-- 2. NUMERIC DATA TYPES -->
+  <Numerics>
+    <decimalType>-128.55</decimalType>
+    <floatType>3.14159E2</floatType>
+    <doubleType>1.7976931348623157E308</doubleType>
+    <booleanType>true</booleanType>
+  </Numerics>
+
+  <!-- 3. INTEGER DATA TYPES HIERARCHY -->
+  <Integers>
+    <integerType>999999999999999999</integerType>
+    <nonPositiveIntegerType>-45</nonPositiveIntegerType>
+    <negativeIntegerType>-1</negativeIntegerType>
+    <longType>-9223372036854775808</longType>
+    <intType>-2147483648</intType>
+    <shortType>-32768</shortType>
+    <byteType>-128</byteType>
+    <nonNegativeIntegerType>105</nonNegativeIntegerType>
+    <unsignedLongType>18446744073709551615</unsignedLongType>
+    <unsignedIntType>4294967295</unsignedIntType>
+    <unsignedShortType>65535</unsignedShortType>
+    <unsignedByteType>255</unsignedByteType>
+    <positiveIntegerType>1</positiveIntegerType>
+  </Integers>
+
+  <!-- 4. DATE, TIME, AND DURATION TYPES -->
+  <DatesAndTimes>
+    <durationType>P2Y3M4DT6H8M10S</durationType>
+    <dateTimeType>2026-06-23T14:30:00-05:00</dateTimeType>
+    <timeType>14:30:00Z</timeType>
+    <dateType>2026-06-23</dateType>
+    <gYearMonthType>2026-06</gYearMonthType>
+    <gYearType>2026</gYearType>
+    <gMonthDayType>--06-23</gMonthDayType>
+    <gDayType>---23</gDayType>
+    <gMonthType>--06</gMonthType>
+  </DatesAndTimes>
+
+  <!-- 5. BINARY DATA TYPES -->
+  <BinaryData>
+    <hexBinaryType>A1B2C3D4E5F6</hexBinaryType>
+    <!-- Represents standard "Hello World" in base64 -->
+    <base64BinaryType>SGVsbG8gV29ybGQ=</base64BinaryType>
+  </BinaryData>
+
+  <!-- 6. ADVANCED XML IDENTIFIERS AND SYSTEM TOKENS -->
+  <XmlIdentifiers>
+    <anyURIType>https://www.w3.org/TR/xmlschema11-1/</anyURIType>
+    <QNameType>string</QNameType>
+    <nmtokenType>Valid-NMTOKEN-Value</nmtokenType>
+    <nmtokensType>Token1 Token2 Token3</nmtokensType>
+    <IdTarget idAttr="NODE_001">Target element containing data.</IdTarget>
+    <IdReference refAttr="NODE_001" refsAttr="NODE_001 NODE_001">Reference entity element.</IdReference>
+  </XmlIdentifiers>
+
+</TestingSuite>
