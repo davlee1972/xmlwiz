@@ -6,7 +6,7 @@ Author: David Lee
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from datetime import datetime
+from datetime import datetime, date, time
 import decimal
 import json
 import glob
@@ -20,7 +20,6 @@ import sys
 from zipfile import ZipFile
 
 import xmlschema
-from xmlschema.converters import ColumnarConverter
 from xmlschema import XMLResource
 
 from xmlwiz.pyarrow_converter import PyArrowConverter
@@ -28,6 +27,12 @@ from xmlwiz.pyarrow_converter import PyArrowConverter
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+
+def get_base_type(parent_type):
+    if hasattr(parent_type, "base_type") and parent_type.base_type:
+        return get_base_type(parent_type.base_type)
+    else:
+        return parent_type
 
 def json_decoder(obj):
     """
@@ -37,9 +42,13 @@ def json_decoder(obj):
     """
     if isinstance(obj, decimal.Decimal):
         return float(obj)
-    if isinstance(obj, datetime):
+    elif isinstance(obj, datetime):
         return obj.strftime('%Y-%m-%d %H:%M:%S.%f')
-    if isinstance(obj, set):
+    elif isinstance(obj, date):
+        return obj.strftime('%Y-%m-%d')
+    elif isinstance(obj, time):
+        return obj.isoformat()
+    elif isinstance(obj, set):
         return list(obj)
     raise TypeError(repr(obj) + " is not JSON serializable")
 
@@ -98,13 +107,12 @@ def map_xsd_type_to_arrow(xsd_type):
         "duration": pa.duration("us"),
     }
 
-    if hasattr(xsd_type, "base_type") and xsd_type.base_type:
-        if xsd_type.base_type.is_list():
-            return pa.list_(XSD_TO_PYARROW.get(xsd_type.base_type.item_type.local_name, pa.string()))
-        else:
-            xsd_type = xsd_type.base_type
+    xsd_local_type = get_base_type(xsd_type)
 
-    return XSD_TO_PYARROW.get(xsd_type.local_name, pa.string())  # Fallback to string for unknown primitives
+    if xsd_local_type.is_list():
+        return pa.list_(XSD_TO_PYARROW.get(xsd_local_type.item_type.local_name, pa.string()))
+
+    return XSD_TO_PYARROW.get(xsd_local_type.local_name, pa.string())  # Fallback to string for unknown primitives
 
 
 def xsd_element_to_arrow_field(xsd_element):
@@ -116,7 +124,7 @@ def xsd_element_to_arrow_field(xsd_element):
         result_dict = {xsd_element.local_name + attr_name: (map_xsd_type_to_arrow(attr.type), True) for attr_name, attr in xsd_element.attributes.items()}
 
     # Check if the element contains nested children (complex type)
-    if xsd_element.type.simple_type is not None:
+    if xsd_element.type.simple_type:
         nullable = xsd_element.min_occurs == 0
         result_dict[xsd_element.local_name] = (map_xsd_type_to_arrow(xsd_element.type), nullable)
 
@@ -147,7 +155,7 @@ def xsd_element_to_arrow_field(xsd_element):
 def convert_xml_schema_to_pyarrow_schema(schema, path=None):
     """Converts the XML Schema into a PyArrow Schema."""
     arrow_fields = []
-    
+
     # Process each top-level root element defined in the XML schema
     if path:
         xsd_elem = schema.find(path)
@@ -180,7 +188,7 @@ def write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output
 
     _logger.info("Generating schema from " + xsd_file)
 
-    xml_schema = xmlschema.XMLSchema11(xsd_file, converter=ColumnarConverter)
+    xml_schema = xmlschema.XMLSchema11(xsd_file, converter=PyArrowConverter)
 
     _logger.info("Parsing " + input_file)
 
@@ -251,7 +259,7 @@ def write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output
         return processed
 
 
-def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processed, rows_per_batch=1000):
+def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processed, rows_per_batch=10000):
 
     _logger.info("Generating schema from " + xsd_file)
 
@@ -290,7 +298,7 @@ def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processe
             rows.append(xml_dict)
             rowcount += 1
 
-            if rowcount == 100:
+            if rowcount == rows_per_batch:
 
                 table = pa.Table.from_pylist(rows, schema=pyarrow_schema)
                 writer.write_table(table)

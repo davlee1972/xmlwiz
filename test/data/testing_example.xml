@@ -4,7 +4,8 @@
               xsi:schemaLocation="https://example.com schema.xsd">
 
   <!-- testing call -->
-  <!-- python xml_wiz.py -t . -x .\test\data\testing_example.xsd .\test\data\testing_example.xml -->
+  <!-- python xml_wiz.py -o jsonl -t . -x .\test\data\testing_example.xsd .\test\data\testing_example.xml -->
+  <!-- python xml_wiz.py -o parquet -t . -x .\test\data\testing_example.xsd .\test\data\testing_example.xml -->
 
   <!-- 1. STRING AND TEXT DERIVATIVES -->
   <Strings>
@@ -16,6 +17,15 @@
     <NCNameType>NonColonizedName</NCNameType>
   </Strings>
 
+  <listOfStrings>
+    <stringType>Standard text string with line breaks and tabs.</stringType>
+    <normalizedStringType>Text string where tabs, line feeds, and returns are converted to spaces.</normalizedStringType>
+    <tokenType>Text with collapsed spaces and no leading/trailing whitespace.</tokenType>
+    <languageType>en-US</languageType>
+    <NameType>Valid_XML_Name.123</NameType>
+    <NCNameType>NonColonizedName</NCNameType>
+  </listOfStrings>
+
   <!-- 2. NUMERIC DATA TYPES -->
   <Numerics>
     <decimalType>-128.55</decimalType>
@@ -23,6 +33,13 @@
     <doubleType>1.7976931348623157E308</doubleType>
     <booleanType>true</booleanType>
   </Numerics>
+
+  <listOfNumerics>
+    <decimalType>-128.55</decimalType>
+    <floatType>3.14159E2</floatType>
+    <doubleType>1.7976931348623157E308</doubleType>
+    <booleanType>true</booleanType>
+  </listOfNumerics>
 
   <!-- 3. INTEGER DATA TYPES HIERARCHY -->
   <Integers>
