@@ -20,7 +20,6 @@ from xmlschema.converters.base import ElementData
 if TYPE_CHECKING:
     from xmlschema.validators import XsdElement
 
-
 class PyArrowConverter(ColumnarConverter):
     """
     XML Schema based converter class for columnar formats.
@@ -33,38 +32,40 @@ class PyArrowConverter(ColumnarConverter):
     """
     __slots__ = ()
 
+    def get_python_value(self, data_text, xsd_type):
+
+        from xmlwiz.convert_xml import get_base_type
+
+        local_type = get_base_type(xsd_type)
+        if local_type.local_name == "date":
+            return datetime.strptime(data_text, "%Y-%m-%d").date()
+        elif local_type.local_name == "dateTime":
+            return datetime.fromisoformat(data_text)
+        elif local_type.local_name == "duration":
+            dur = isodate.parse_duration(data_text)
+            microseconds = int(dur.total_seconds() * 1_000_000)
+            return microseconds
+        elif local_type.local_name == "time":
+            return datetime.strptime(data_text, "%H:%M:%S%z").time()
+        else:
+            return data_text
 
     def element_decode(self, data: ElementData, xsd_element: 'XsdElement',
                        xsd_type: BaseXsdType | None = None, level: int = 0) -> Any:
         result_dict: Any
 
-
         xsd_type = xsd_type or xsd_element.type
         if data.attributes:
-
-            date_items = [k for k, v in xsd_type.attributes.items() if v.type.local_name == "date"]
-
             if self.attr_prefix:
                 pfx = xsd_element.local_name + self.attr_prefix
             else:
                 pfx = xsd_element.local_name
-            result_dict = self.dict_class((pfx + self.map_qname(k), datetime.strptime(v, "%Y-%m-%d").date() if k in date_items else v) for k, v in data.attributes)
+            result_dict = self.dict_class((pfx + self.map_qname(k), self.get_python_value(v, xsd_type.attributes[k].type)) for k, v in data.attributes if k in xsd_type.attributes)
         else:
             result_dict = self.dict_class()
 
         if xsd_type.simple_type is not None:
-            if xsd_type.local_name == "date":
-                result_dict[xsd_element.local_name] = datetime.strptime(data.text, "%Y-%m-%d").date()
-            elif xsd_type.local_name == "dateTime":
-                result_dict[xsd_element.local_name] = datetime.fromisoformat(data.text)
-            elif xsd_type.local_name == "duration":
-                dur = isodate.parse_duration(data.text)
-                microseconds = int(dur.total_seconds() * 1_000_000)
-                result_dict[xsd_element.local_name] = microseconds
-            elif xsd_type.local_name == "time":
-                result_dict[xsd_element.local_name] = datetime.strptime(data.text, "%H:%M:%S%z").time()
-            else:
-                result_dict[xsd_element.local_name] = data.text
+            result_dict[xsd_element.local_name] = self.get_python_value(data.text, xsd_type)
 
         if data.content:
             for name, value, xsd_child in self.map_content(data.content):

@@ -25,6 +25,19 @@
           </xs:complexType>
         </xs:element>
 
+        <xs:element name="listOfStrings" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="stringType" type="xs:string" maxOccurs="unbounded"/>
+              <xs:element name="normalizedStringType" type="xs:normalizedString" maxOccurs="10"/>
+              <xs:element name="tokenType" type="xs:token" minOccurs="0"/>
+              <xs:element name="languageType" type="xs:language" minOccurs="0" maxOccurs="unbounded"/>
+              <xs:element name="NameType" type="xs:Name"/>
+              <xs:element name="NCNameType" type="xs:NCName"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
         <!-- =================================================== -->
         <!-- 2. NUMERIC DATA TYPES (FLOATS AND DECIMALS)         -->
         <!-- =================================================== -->
@@ -35,6 +48,17 @@
               <xs:element name="floatType" type="xs:float"/>
               <xs:element name="doubleType" type="xs:double"/>
               <xs:element name="booleanType" type="xs:boolean"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <xs:element name="listOfNumerics">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="decimalType" type="xs:decimal" maxOccurs="unbounded"/>
+              <xs:element name="floatType" type="xs:float" maxOccurs="10"/>
+              <xs:element name="doubleType" type="xs:double" minOccurs="0"/>
+              <xs:element name="booleanType" type="xs:boolean" minOccurs="0" maxOccurs="unbounded"/>
             </xs:sequence>
           </xs:complexType>
         </xs:element>
