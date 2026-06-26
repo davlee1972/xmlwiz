@@ -1,38 +1,57 @@
-"""
-(c) 2019 David Lee.
+#
+# MIT License
+#
+# $Copyright (c) 2026 David Lee
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
-Author: David Lee
-"""
+
+import os
+import sys
+import subprocess
+from multiprocessing import Pool
+import logging
+
+from datetime import datetime, date, time, timedelta
+import decimal
+import isodate
+
+import json
+import glob
+from functools import reduce
+
+import gzip
+import tarfile
+from zipfile import ZipFile
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from datetime import datetime, date, time
-import decimal
-import json
-import glob
-from multiprocessing import Pool
-import subprocess
-import os
-import gzip
-import tarfile
-import logging
-import sys
-from zipfile import ZipFile
 
 import xmlschema
-from xmlschema import XMLResource
+from lxml import etree
 
-from xmlwiz.pyarrow_converter import PyArrowConverter
+from xmlwiz.mappings import ElementTypeEnum, element_decode
+from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_pyarrow, build_action_items
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-
-def get_base_type(parent_type):
-    if hasattr(parent_type, "base_type") and parent_type.base_type:
-        return get_base_type(parent_type.base_type)
-    else:
-        return parent_type
 
 def json_decoder(obj):
     """
@@ -43,134 +62,125 @@ def json_decoder(obj):
     if isinstance(obj, decimal.Decimal):
         return float(obj)
     elif isinstance(obj, datetime):
-        return obj.strftime('%Y-%m-%d %H:%M:%S.%f')
+        return obj.strftime("%Y-%m-%d %H:%M:%S.%f")
     elif isinstance(obj, date):
-        return obj.strftime('%Y-%m-%d')
+        return obj.strftime("%Y-%m-%d")
     elif isinstance(obj, time):
         return obj.isoformat()
+    elif isinstance(obj, timedelta):
+        return int(obj.total_seconds() * 1_000_000)
+    elif isinstance(obj, bytes):
+        return obj.decode()
     elif isinstance(obj, set):
         return list(obj)
-    raise TypeError(repr(obj) + " is not JSON serializable")
+    raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def map_xsd_type_to_arrow(xsd_type):
+def parse_xml(input_file, action_index, xpath_items, rows_per_batch):
 
-    # Core mapping dictionary
-    XSD_TO_PYARROW = {
-        # Signed Integers
-        "byte": pa.int8(),
-        "short": pa.int16(),
-        "int": pa.int32(),
-        "long": pa.int64(),
-        "integer": pa.int64(),
-        
-        # Unsigned Integers
-        "unsignedByte": pa.uint8(),
-        "unsignedShort": pa.uint16(),
-        "unsignedInt": pa.uint32(),
-        "unsignedLong": pa.uint64(),
-        
-        # Special Constrained Integers (Mapped to standard physical types)
-        "positiveInteger": pa.uint64(),      # Constraint: >= 1
-        "nonNegativeInteger": pa.uint64(),   # Constraint: >= 0
-        "negativeInteger": pa.int64(),       # Constraint: <= -1
-        "nonPositiveInteger": pa.int64(),    # Constraint: <= 0
-        
-        # Floats & Decimals
-        "float": pa.float32(),
-        "double": pa.float64(),
-        "decimal": pa.decimal128(38, 10),    # Defaulting to a standard precision/scale
-        
-        # Strings & Identifiers
-        "string": pa.string(),
-        "normalizedString": pa.string(),
-        "token": pa.string(),
-        "Name": pa.string(),
-        "NCName": pa.string(),
-        "NMTOKEN": pa.string(),
-        "ID": pa.string(),
-        "IDREF": pa.string(),
-        "anyURI": pa.string(),
-        "QName": pa.string(),
+    row_counter = 0
 
-        # Binary
-        "hexBinary": pa.binary(),
-        "base64Binary": pa.binary(),
-        
-        # Boolean
-        "boolean": pa.bool_(),
-        
-        # Temporal (Defaulting to standard microsecond resolution)
-        "date": pa.date32(),
-        "time": pa.time64("us"),
-        "dateTime": pa.timestamp("us"),
-        "duration": pa.duration("us"),
-    }
+    result = {}
+    parent = result
 
-    xsd_local_type = get_base_type(xsd_type)
+    current_xpath = []
+    current_level = 0
 
-    if xsd_local_type.is_list():
-        return pa.list_(XSD_TO_PYARROW.get(xsd_local_type.item_type.local_name, pa.string()))
+    context = etree.iterparse(
+        input_file,
+        events=(
+            "start",
+            "end",
+        ),
+    )
 
-    return XSD_TO_PYARROW.get(xsd_local_type.local_name, pa.string())  # Fallback to string for unknown primitives
+    for event, elem in context:
+        elem.tag = etree.QName(elem.tag).localname
+        if event == "start":
+            current_xpath.append(elem.tag)
+            current_level += 1
+            try:
+                element_type = action_index[current_level][tuple(current_xpath)]
+            except KeyError:
+                continue
 
-
-def xsd_element_to_arrow_field(xsd_element):
-    """Recursively processes an XSD element node into a PyArrow Field."""
-
-    result_dict = {}
-
-    if hasattr(xsd_element, "attributes"):
-        result_dict = {xsd_element.local_name + attr_name: (map_xsd_type_to_arrow(attr.type), True) for attr_name, attr in xsd_element.attributes.items()}
-
-    # Check if the element contains nested children (complex type)
-    if xsd_element.type.simple_type:
-        nullable = xsd_element.min_occurs == 0
-        result_dict[xsd_element.local_name] = (map_xsd_type_to_arrow(xsd_element.type), nullable)
-
-    if hasattr(xsd_element.type, "content") and hasattr(xsd_element.type.content, "iter_elements"):
-        for xsd_child in xsd_element.type.content.iter_elements():
-            name = xsd_child.local_name
-            child_type = xsd_element_to_arrow_field(xsd_child)
-
-            if xsd_child.is_single():
-                if xsd_child.type is not None and xsd_child.type.simple_type is not None:
-                    for i in range(child_type.num_fields):
-                        field = child_type.field(i)
-                        result_dict[field.name] = (field.type, field.nullable)
+            if element_type == ElementTypeEnum.DICT:
+                parent[elem.tag] = {}
+                old_parent = parent
+                parent = parent[elem.tag]
+                for k, v in elem.attrib.items():
+                    k = etree.QName(k).localname
+                    try:
+                        attr_type = action_index[current_level+1][tuple(current_xpath + [elem.tag + k])]
+                        elem_data = element_decode(v, attr_type)
+                        parent[elem.tag + k] = elem_data
+                    except KeyError:
+                        pass
+            elif element_type == ElementTypeEnum.LIST:
+                if elem.tag not in parent:
+                    parent[elem.tag] = []
+                    old_parent = parent
+                    parent = parent[elem.tag]
+            elif element_type == ElementTypeEnum.LIST_OF_DICT:
+                if elem.tag not in parent:
+                    parent[elem.tag] = [{}]
+                    old_parent = parent
+                    parent = parent[elem.tag][0]
+                    for k, v in elem.attrib.items():
+                        k = etree.QName(k).localname
+                        try:
+                            attr_type = action_index[current_level+1][tuple(current_xpath + [elem.tag + k])]
+                            elem_data = element_decode(v, attr_type)
+                            parent[elem.tag + k] = elem_data
+                        except KeyError:
+                            pass
                 else:
-                    child_nullable = xsd_child.min_occurs == 0
-                    result_dict[name] = (child_type, child_nullable)
-            else:
-                if xsd_child.type is not None and xsd_child.type.simple_type is not None and not xsd_child.attributes:
-                    result_dict[name] = (pa.list_(child_type.field(0).type), True)
+                    parent[elem.tag].append({})
+                    parent = parent[elem.tag][-1]
+
+        elif event == "end":
+            try:
+                element_type = action_index[current_level][tuple(current_xpath)]
+
+                if element_type in [
+                    ElementTypeEnum.DICT,
+                    ElementTypeEnum.LIST,
+                    ElementTypeEnum.LIST_OF_DICT,
+                ]:
+                    parent = old_parent
                 else:
-                    result_dict[name] = (pa.list_(child_type), True)
+                    parent_type = action_index[current_level - 1][
+                        tuple(current_xpath[:-1])
+                    ]
 
-    result_dict = pa.struct([pa.field(k, v[0], nullable=v[1]) for k, v in result_dict.items()])
+                    elem_data = element_decode(elem.text, element_type)
+                    if parent_type in [
+                        ElementTypeEnum.DICT,
+                        ElementTypeEnum.LIST_OF_DICT,
+                    ]:
+                        parent[elem.tag] = elem_data
+                    elif parent_type == ElementTypeEnum.LIST:
+                        parent.append(elem_data)
+            except KeyError:
+                pass
 
-    return result_dict
+            elem.clear()
+            if current_xpath == xpath_items:
+                row_counter += 1
+                if row_counter == rows_per_batch:
+                    yield result
+                    parent[elem.tag] = {}
+                    row_counter = 0
+            
+            current_level -= 1
+            child = current_xpath.pop()
 
-
-def convert_xml_schema_to_pyarrow_schema(schema, path=None):
-    """Converts the XML Schema into a PyArrow Schema."""
-    arrow_fields = []
-
-    # Process each top-level root element defined in the XML schema
-    if path:
-        xsd_elem = schema.find(path)
-        pa_type = xsd_element_to_arrow_field(xsd_elem)
-        arrow_fields = [
-            pa.field(sub.name, sub.type, nullable=sub.nullable)
-                for sub in pa_type
-        ]
+    if xpath_items:
+        if row_counter:
+            yield result
     else:
-        arrow_fields=[]
-        for name, element in schema.elements.items():
-            pa_type = xsd_element_to_arrow_field(element)
-            arrow_fields.append(pa.field(name, pa_type, nullable=True))
+        yield result
 
-    return pa.schema(arrow_fields)
 
 def open_zip_file(zip, filename):
     """
@@ -184,15 +194,17 @@ def open_zip_file(zip, filename):
         return open(filename, "wb")
 
 
-def write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output_format, processed):
-
-    _logger.info("Generating schema from " + xsd_file)
-
-    xml_schema = xmlschema.XMLSchema11(xsd_file, converter=PyArrowConverter)
-
-    _logger.info("Parsing " + input_file)
-
-    _logger.info("Writing to file " + output_file)
+def write_json(
+    output_file,
+    zip,
+    input_file,
+    action_index,
+    xpath_items,
+    schema_type,
+    processed,
+    output_format,
+    rows_per_batch,
+):
 
     def parse_xml_to_json(xml_file, processed):
         """
@@ -201,37 +213,46 @@ def write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output
         :return: data found and processed
         """
 
-        xml_file_resource = XMLResource(xml_file, lazy=lazy, thin_lazy=True)
-        
-        if xpath:
-            xml_iter_decode = xml_schema.iter_decode(xml_file_resource, path=xpath)
-        else:
-            xml_iter_decode = xml_schema.iter_decode(xml_file_resource)
+        for xml_dict in parse_xml(xml_file, action_index, xpath_items, rows_per_batch):
+            if xpath_items:
+                xml_dict = reduce(dict.get, xpath_items, xml_dict)
 
-        for xml_dict in xml_iter_decode:
-            if root:
-                xml_dict = xml_dict[root]
+            if not xml_dict:
+                return processed
 
-            xml_json = json.dumps(xml_dict, default=json_decoder)
+            arrow_obj = pa.array([xml_dict]).cast(schema_type)
 
-            if len(xml_json) > 0:
-                if not processed:
-                    processed = True
-                    file_obj.write(bytes(xml_json, "utf-8"))
-                else:
-                    if output_format == "json":
-                        file_obj.write(bytes("," + os.linesep + xml_json, "utf-8"))
+            if pa.types.is_struct(arrow_obj.type):
+                names = arrow_obj.type.names
+            else:
+                names = arrow_obj.type.value_type.names
+                arrow_obj = arrow_obj.flatten()
+
+            table = pa.Table.from_arrays(
+                arrow_obj.flatten(), names=names
+            )
+
+            pylist = table.to_pylist()
+
+            for row in pylist:
+                xml_json = json.dumps(row, default=json_decoder)
+                if len(xml_json) > 0:
+                    if not processed:
+                        processed = True
+                        file_obj.write(bytes(xml_json, "utf-8"))
                     else:
-                        file_obj.write(bytes(os.linesep + xml_json, "utf-8"))
+                        if output_format == "json":
+                            file_obj.write(bytes("," + os.linesep + xml_json, "utf-8"))
+                        else:
+                            file_obj.write(bytes(os.linesep + xml_json, "utf-8"))
         return processed
 
     with open_zip_file(zip, output_file) as file_obj:
-
         if input_file.endswith((".zip", ".tar.gz")) and output_format == "json":
             file_obj.write(bytes("[" + os.linesep, "utf-8"))
 
         if input_file.endswith(".tar.gz"):
-            zip_file = tarfile.open(input_file, 'r')
+            zip_file = tarfile.open(input_file, "r")
             zip_file_list = zip_file.getmembers()
 
             for member in zip_file_list:
@@ -239,13 +260,13 @@ def write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output
                     processed = parse_xml_to_json(xml_file, processed)
 
         elif input_file.endswith(".zip"):
-            zip_file = ZipFile(input_file, 'r')
+            zip_file = ZipFile(input_file, "r")
             zip_file_list = zip_file.infolist()
 
             for i in range(len(zip_file_list)):
                 with zip_file.open(zip_file_list[i].filename) as xml_file:
                     processed = parse_xml_to_json(xml_file, processed)
-        
+
         elif input_file.endswith(".gz"):
             with gzip.open(input_file) as xml_file:
                 processed = parse_xml_to_json(xml_file, processed)
@@ -259,20 +280,15 @@ def write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output
         return processed
 
 
-def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processed, rows_per_batch=10000):
-
-    _logger.info("Generating schema from " + xsd_file)
-
-    xml_schema = xmlschema.XMLSchema(xsd_file, converter=PyArrowConverter)
-
-    _logger.info("Parsing " + input_file)
-
-    _logger.info("Writing to file " + output_file)
-
-    if xpath:
-        pyarrow_schema = convert_xml_schema_to_pyarrow_schema(xml_schema, path=xpath)
-    else:
-        pyarrow_schema = convert_xml_schema_to_pyarrow_schema(xml_schema)
+def write_parquet(
+    output_file,
+    input_file,
+    action_index,
+    xpath_items,
+    schema_type,
+    processed,
+    rows_per_batch,
+):
 
     def parse_xml_to_parquet(xml_file, processed):
         """
@@ -282,44 +298,40 @@ def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processe
         :return: data found and processed
         """
 
-        xml_file_resource = XMLResource(xml_file, lazy=lazy, thin_lazy=True)
-        
-        if xpath:
-            xml_iter_decode = xml_schema.iter_decode(xml_file_resource, path=xpath)
-        else:
-            xml_iter_decode = xml_schema.iter_decode(xml_file_resource)
+        for xml_dict in parse_xml(xml_file, action_index, xpath_items, rows_per_batch):
 
-        rowcount = 0
-        rows = []
-        for xml_dict in xml_iter_decode:
-            if root:
-                xml_dict = xml_dict[root]
-            
-            rows.append(xml_dict)
-            rowcount += 1
+            if xpath_items:
+                xml_dict = reduce(dict.get, xpath_items, xml_dict)
 
-            if rowcount == rows_per_batch:
+            if not xml_dict:
+                return processed
 
-                table = pa.Table.from_pylist(rows, schema=pyarrow_schema)
+            arrow_obj = pa.array([xml_dict]).cast(schema_type)
+
+            if pa.types.is_struct(arrow_obj.type):
+                names = arrow_obj.type.names
+            else:
+                names = arrow_obj.type.value_type.names
+                arrow_obj = arrow_obj.flatten()
+
+            table = pa.Table.from_arrays(
+                arrow_obj.flatten(), names=names
+            )
+
+            if table.num_rows > 0:
                 writer.write_table(table)
-                rows = []
-                rowcount = 0
                 processed = True
 
-        if rowcount > 0:
-            table = pa.Table.from_pylist(rows, schema=pyarrow_schema)
-            writer.write_table(table)
-            rows = []
-            rowcount = 0
-            processed = True
-
         return processed
-    
+
+    if pa.types.is_struct(schema_type):
+        pyarrow_schema = pa.schema(schema_type)
+    else:
+        pyarrow_schema = pa.schema(schema_type.value_type)
 
     with pq.ParquetWriter(output_file, pyarrow_schema) as writer:
-
         if input_file.endswith(".tar.gz"):
-            zip_file = tarfile.open(input_file, 'r')
+            zip_file = tarfile.open(input_file, "r")
             zip_file_list = zip_file.getmembers()
 
             for member in zip_file_list:
@@ -327,13 +339,13 @@ def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processe
                     processed = parse_xml_to_parquet(xml_file, processed)
 
         elif input_file.endswith(".zip"):
-            zip_file = ZipFile(input_file, 'r')
+            zip_file = ZipFile(input_file, "r")
             zip_file_list = zip_file.infolist()
 
             for i in range(len(zip_file_list)):
                 with zip_file.open(zip_file_list[i].filename) as xml_file:
                     processed = parse_xml_to_parquet(xml_file, processed)
-        
+
         elif input_file.endswith(".gz"):
             with gzip.open(input_file) as xml_file:
                 processed = parse_xml_to_parquet(xml_file, processed)
@@ -344,7 +356,33 @@ def write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processe
         return processed
 
 
-def parse_file(input_file, output_file, xsd_file, output_format, zip, xpath, target_path=None, delete_xml=False):
+def set_unqualified_form(xsd_file_contents):
+    # Parse the XSD file
+    root = etree.fromstring(xsd_file_contents.encode("utf-8"))
+    
+    # Define the W3C XML Schema namespace (required for tag matching)
+    xs_ns = "{http://www.w3.org/2001/XMLSchema}"
+    
+    # Check if the root tag is 'schema' and add the attribute
+    if root.tag == f"{xs_ns}schema":
+        root.set("elementFormDefault", "unqualified")
+        
+        # Save the updated XSD back to the file
+        return etree.tostring(root, encoding="utf-8", xml_declaration=True)
+    else:
+        raise TypeError("Root element is not an xs:schema")
+
+
+def parse_file(
+    input_file,
+    output_file,
+    xsd_file,
+    output_format,
+    zip,
+    xpath,
+    target_path=None,
+    delete_xml=False,
+):
     """
     :param input_file: input file
     :param output_file: output file
@@ -356,22 +394,88 @@ def parse_file(input_file, output_file, xsd_file, output_format, zip, xpath, tar
     :param delete_xml: optional delete xml file after converting
     """
 
-    if xpath:
-        xpath_items = xpath.split("/")
-        lazy = len(xpath_items) - 2
-        if lazy < 0:
-            lazy = False
-        root = xpath_items[-1]
-    else:
-        lazy = False
-        root = None
-
     processed = False
 
+    with open(xsd_file) as f:
+        xsd_file_contents = f.read()
+    
+    xsd_file_contents = set_unqualified_form(xsd_file_contents)
+
+    xml_schema = xmlschema.XMLSchema11(xsd_file_contents)
+    pyarrow_schema = convert_xsd_to_pyarrow(xml_schema)
+
+    # Each xml file should only have one root element, but have to merge different root elements across files.
+    if len(pyarrow_schema.names) > 1:
+        pyarrow_schema = pa.schema(
+            [column.with_nullable(True) for column in pyarrow_schema]
+        )
+
+    schema_type = pa.struct(pyarrow_schema)
+
+    action_items = build_action_items(pyarrow_schema, [], xml_schema)
+
+    action_index = {}
+    for k, v in action_items.items():
+        level = len(k)
+        if level not in action_index:
+            action_index[level] = {}
+        action_index[level][k] = v
+
+    xpath_items = None
+    new_action_index = action_index
+
+    if xpath:
+        xpath_items = xpath.split("/")
+        xpath_items = xpath_items[1:]
+
+        current_type = pyarrow_schema
+        for column in xpath_items:
+            current_field = current_type.field(column)
+            current_type = current_field.type
+        schema_type = current_type
+
+        xpath_count = len(xpath_items)
+        xpath_key = tuple(xpath_items)
+        new_action_index = {}
+
+        for i, v in action_index.items():
+            new_items = {}
+            if i > xpath_count:
+                new_items = {
+                    k2: v2 for k2, v2 in v.items() if k2[:xpath_count] == xpath_key
+                }
+            else:
+                new_items = {k2: v2 for k2, v2 in v.items() if k2 == xpath_key[:i]}
+
+            if new_items:
+                new_action_index[i] = new_items
+
+    _logger.info("Parsing " +  input_file)
+    _logger.info("Writing to file " + output_file)
+
     if output_format in ["json", "jsonl"]:
-        processed = write_json(output_file, zip, input_file, xsd_file, lazy, root, xpath, output_format, processed)
+        processed = write_json(
+            output_file,
+            zip,
+            input_file,
+            new_action_index,
+            xpath_items,
+            schema_type,
+            processed,
+            output_format,
+            rows_per_batch=10000,
+        )
+
     elif output_format in ["parquet"]:
-        processed = write_parquet(output_file, input_file, xsd_file, lazy, root, xpath, processed)
+        processed = write_parquet(
+            output_file,
+            input_file,
+            new_action_index,
+            xpath_items,
+            schema_type,
+            processed,
+            rows_per_batch=10000,
+        )
 
     # Remove output file if no data is generated
     if not processed:
@@ -385,7 +489,19 @@ def parse_file(input_file, output_file, xsd_file, output_format, zip, xpath, tar
     _logger.info("Completed " + input_file)
 
 
-def convert_xml(xsd_file=None, output_format="jsonl", target_path=None, zip=False, xpath=None, multi=1, no_overwrite=False, verbose="DEBUG", log=None, delete_xml=None, xml_files=None):
+def convert_xml(
+    xsd_file=None,
+    output_format="jsonl",
+    target_path=None,
+    zip=False,
+    xpath=None,
+    multi=1,
+    no_overwrite=False,
+    verbose="DEBUG",
+    log=None,
+    delete_xml=None,
+    xml_files=None,
+):
     """
     :param xsd_file: xsd file name
     :param output_format: jsonl or json
@@ -401,7 +517,9 @@ def convert_xml(xsd_file=None, output_format="jsonl", target_path=None, zip=Fals
 
     """
 
-    formatter = logging.Formatter("%(levelname)s - %(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    formatter = logging.Formatter(
+        "%(levelname)s - %(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
 
     _logger.handlers.clear()
     ch = logging.StreamHandler()
@@ -423,7 +541,17 @@ def convert_xml(xsd_file=None, output_format="jsonl", target_path=None, zip=Fals
         sys.exit(1)
 
     # open target files
-    file_list = list(set([f for _files in [glob.glob(xml_files[x]) for x in range(0, len(xml_files))] for f in _files]))
+    file_list = list(
+        set(
+            [
+                f
+                for _files in [
+                    glob.glob(xml_files[x]) for x in range(0, len(xml_files))
+                ]
+                for f in _files
+            ]
+        )
+    )
     file_count = len(file_list)
 
     if multi > 1:
@@ -437,9 +565,8 @@ def convert_xml(xsd_file=None, output_format="jsonl", target_path=None, zip=Fals
         _logger.info(file_list)
 
     for filename in file_list:
-
         path, xml_file = os.path.split(os.path.realpath(filename))
-        
+
         output_file = xml_file
 
         if output_file.endswith(".gz"):
@@ -471,9 +598,31 @@ def convert_xml(xsd_file=None, output_format="jsonl", target_path=None, zip=Fals
                 continue
 
         if multi > 1:
-            parse_queue_pool.apply_async(parse_file, args=(filename, output_file, xsd_file, output_format, zip, xpath, target_path, delete_xml), error_callback=_logger.info)
+            parse_queue_pool.apply_async(
+                parse_file,
+                args=(
+                    filename,
+                    output_file,
+                    xsd_file,
+                    output_format,
+                    zip,
+                    xpath,
+                    target_path,
+                    delete_xml,
+                ),
+                error_callback=_logger.info,
+            )
         else:
-            parse_file(filename, output_file, xsd_file, output_format, zip, xpath, target_path, delete_xml)
+            parse_file(
+                filename,
+                output_file,
+                xsd_file,
+                output_format,
+                zip,
+                xpath,
+                target_path,
+                delete_xml,
+            )
 
     if multi > 1:
         parse_queue_pool.close()
