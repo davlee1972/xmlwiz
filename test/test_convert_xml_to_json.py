@@ -4,6 +4,7 @@ import tempfile
 import pytest
 from xmlwiz.convert_xml import parse_file
 
+
 def test_json(snapshot):
 
     realpath = os.path.dirname(os.path.realpath(__file__))
@@ -20,6 +21,7 @@ def test_json(snapshot):
         target_json = json.loads(f.read())
     os.remove(output_file)
     assert target_json == snapshot
+
 
 def test_jsonl(snapshot):
 
@@ -41,4 +43,3 @@ def test_jsonl(snapshot):
             target_json.append(json.loads(line))
     os.remove(output_file)
     assert target_json == snapshot
-

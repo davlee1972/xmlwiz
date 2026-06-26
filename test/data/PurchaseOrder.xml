@@ -1,4 +1,10 @@
 <?xml version="1.0"?>
+
+<!-- testing call -->
+<!-- python xml_wiz.py -o jsonl -t . -x .\test\data\PurchaseOrder.xsd .\test\data\PurchaseOrder.xml -->
+<!-- python xml_wiz.py -o parquet -t . -x .\test\data\PurchaseOrder.xsd .\test\data\PurchaseOrder.xml -->
+
+
 <purchaseOrder orderDate="1999-10-20">
     <shipTo country="US">
         <name>Alice Smith</name>
