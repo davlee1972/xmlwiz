@@ -178,7 +178,7 @@ def parse_xml(input_file, action_index, xpath_list, rows_per_batch):
                             
                     # Safely remove the target key from the final dictionary level
                     if isinstance(current, dict):
-                        del current[key_list[-1]]
+                        del current[xpath_list[-1]]
                     return False
                     
                     row_counter = 0
@@ -366,6 +366,7 @@ def parse_file(
     output_format,
     zip,
     xpath,
+    rows_per_batch,
     target_path=None,
     delete_xml=False,
 ):
@@ -430,7 +431,7 @@ def parse_file(
             schema_type,
             processed,
             output_format,
-            rows_per_batch=10000,
+            rows_per_batch,
         )
 
     elif output_format in ["parquet"]:
@@ -441,7 +442,7 @@ def parse_file(
             xpath_list,
             schema_type,
             processed,
-            rows_per_batch=10000,
+            rows_per_batch,
         )
 
     # Remove output file if no data is generated
@@ -459,6 +460,7 @@ def parse_file(
 def convert_xml(
     xsd_file=None,
     output_format="jsonl",
+    rows_per_batch=None,
     target_path=None,
     zip=False,
     xpath=None,
@@ -483,6 +485,8 @@ def convert_xml(
     :param xml_files: list of xml_files
 
     """
+
+    print(rows_per_batch)
 
     formatter = logging.Formatter(
         "%(levelname)s - %(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
@@ -574,6 +578,7 @@ def convert_xml(
                     output_format,
                     zip,
                     xpath,
+                    rows_per_batch,
                     target_path,
                     delete_xml,
                 ),
@@ -587,6 +592,7 @@ def convert_xml(
                 output_format,
                 zip,
                 xpath,
+                rows_per_batch,
                 target_path,
                 delete_xml,
             )
