@@ -23,22 +23,17 @@
 
 
 from enum import IntEnum
-from datetime import datetime
-import isodate
-
 import pyarrow as pa
 
 
 class ElementTypeEnum(IntEnum):
     DICT = 1
     LIST = 2
-    LIST_OF_DICT = 3
-    STRING = 4
-    STRING_LIST = 5
-    DURATION = 6
-    TIMESTAMP = 7
-    TIME = 8
-    GEGORIAN = 9
+    STRING = 3
+    DURATION = 4
+    TIMESTAMP = 5
+    TIME = 6
+    GEGORIAN = 7
 
 gegorianPeriod = pa.struct([
     pa.field('yyyy', pa.int16(), nullable=True),
@@ -96,39 +91,15 @@ XSD_TO_PYARROW = {
     "gMonth": gegorianPeriod,
 }
 
-def element_decode(elem_text, element_type):
-    if element_type == ElementTypeEnum.STRING_LIST:
-        return elem_text.split(" ")
-    elif element_type == ElementTypeEnum.DURATION:
-        dur = isodate.parse_duration(elem_text)
-        microseconds = int(dur.total_seconds() * 1_000_000)
-        return microseconds
-    elif element_type == ElementTypeEnum.TIMESTAMP:
-        return datetime.fromisoformat(elem_text)
-    elif element_type == ElementTypeEnum.TIME:
-        return datetime.strptime(elem_text, "%H:%M:%S%z").time()
-    elif element_type == ElementTypeEnum.GEGORIAN:
-        date_parts = elem_text.split("-")
-        date_len = len(date_parts)
-        """
-            <gYearMonthType>2026-06</gYearMonthType>
-            <gYearType>2026</gYearType>
-            <gMonthDayType>--06-23</gMonthDayType>
-            <gDayType>---23</gDayType>
-            <gMonthType>--06</gMonthType>
-        """
-        if date_len == 1:
-            return {"yyyy": int(date_parts[0])}
-        elif date_len == 2:
-            return {"yyyy": int(date_parts[0]), 'mm': int(date_parts[1])}
-        elif date_len == 3:
-            return {"mm": int(date_parts[2])}
-        elif date_len == 4:
-            if date_parts[2]:
-                return {"mm": int(date_parts[2]), 'dd': int(date_parts[3])}
-            else:
-                return {"dd": int(date_parts[3])}
+XSD_TO_ELEMENT_DECODE = {
+    "time": ElementTypeEnum.TIME,
+    "dateTime": ElementTypeEnum.TIMESTAMP,
+    "duration": ElementTypeEnum.DURATION,
+    "gYearMonth": ElementTypeEnum.GEGORIAN,
+    "gYear": ElementTypeEnum.GEGORIAN,
+    "gMonthDay": ElementTypeEnum.GEGORIAN,
+    "gDay": ElementTypeEnum.GEGORIAN,
+    "gMonth": ElementTypeEnum.GEGORIAN,
+}
 
-        return datetime.strptime(elem_text, "%H:%M:%S%z").time()
-    else:
-        return elem_text
+

@@ -21,60 +21,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from datetime import datetime
+import isodate
 import pyarrow as pa
 
-import xmlschema
-
-from xmlwiz.mappings import ElementTypeEnum, XSD_TO_PYARROW, gegorianPeriod
-
-
-def build_action_items(obj, current_keys, xml_schema):
-    action_items = {}
-    current_xpath = "/" + "/".join(current_keys)
-    for i, name in enumerate(obj.names):
-        action_key = tuple(current_keys + [name])
-        field_type = obj.field(i).type
-        if pa.types.is_struct(field_type):
-            if map_xsd_type_to_arrow(xml_schema.find(current_xpath + "/" + name).type) == gegorianPeriod:
-                action_items[action_key] = ElementTypeEnum.GEGORIAN
-            else:
-                action_items[action_key] = ElementTypeEnum.DICT
-                action_items.update(build_action_items(field_type, current_keys + [name], xml_schema))
-        elif (
-            pa.types.is_list(field_type)
-            or pa.types.is_large_list(field_type)
-            or pa.types.is_list_view(field_type)
-            or pa.types.is_large_list_view(field_type)
-        ):
-
-            if name.startswith(current_keys[-1]):
-                xpath_name = name[len(current_keys[-1]):]
-            else:
-                xpath_name = None
-
-            current_xpath = "/" + "/".join(current_keys)
-
-            if xml_schema.find(current_xpath + "/" + name) and xml_schema.find(current_xpath + "/" + name).type.is_list():
-                action_items[action_key] = ElementTypeEnum.STRING_LIST
-            elif xpath_name and xpath_name in xml_schema.find(current_xpath).attributes and xml_schema.find(current_xpath).attributes[xpath_name].type.is_list():
-                action_items[action_key] = ElementTypeEnum.STRING_LIST
-            elif pa.types.is_struct(field_type.value_type):
-                action_items[action_key] = ElementTypeEnum.LIST_OF_DICT
-                action_items.update(
-                    build_action_items(field_type.value_type, current_keys + [name], xml_schema)
-                )
-            else:
-                action_items[action_key] = ElementTypeEnum.LIST
-        else:
-            if pa.types.is_duration(field_type):
-                action_items[action_key] = ElementTypeEnum.DURATION
-            elif pa.types.is_timestamp(field_type):
-                action_items[action_key] = ElementTypeEnum.TIMESTAMP
-            elif pa.types.is_time(field_type):
-                action_items[action_key] = ElementTypeEnum.TIME
-            else:
-                action_items[action_key] = ElementTypeEnum.STRING
-    return action_items
+from xmlwiz.mappings import ElementTypeEnum, XSD_TO_PYARROW, XSD_TO_ELEMENT_DECODE
 
 
 def get_base_type(parent_type):
@@ -89,60 +40,123 @@ def map_xsd_type_to_arrow(xsd_type):
     xsd_local_type = get_base_type(xsd_type)
 
     if xsd_local_type.is_list():
-        return pa.list_(
+        decode = XSD_TO_ELEMENT_DECODE.get(xsd_local_type.item_type.local_name, ElementTypeEnum.STRING)
+        return (ElementTypeEnum.LIST, decode), pa.list_(
             XSD_TO_PYARROW.get(xsd_local_type.item_type.local_name, pa.string())
         )
 
-    return XSD_TO_PYARROW.get(
+    decode = XSD_TO_ELEMENT_DECODE.get(xsd_local_type.local_name, ElementTypeEnum.STRING)
+    return decode, XSD_TO_PYARROW.get(
         xsd_local_type.local_name, pa.string()
     )  # Fallback to string for unknown primitives
 
 
-def convert_xsd_type(elem):
+def convert_xsd_type(elem, action_index, xpath):
     # Handle simple types (scalars)
 
     nullable = elem.min_occurs == 0
 
-    if elem.type.is_simple():
-        return map_xsd_type_to_arrow(elem.type), nullable
+    xpath_key = tuple(xpath + [elem.local_name])
+    level = len(xpath) + 1
 
-    # Handle complex types (structs)
-    if elem.type.is_complex():
+    if level not in action_index:
+        action_index[level] = {}
+
+    if elem.type.is_simple():
+        decode, pyarrow_type = map_xsd_type_to_arrow(elem.type)
+        action_index[level][xpath_key] = decode
+        return pyarrow_type, nullable
+    else:
+        # Handle complex types (structs)
         fields = []
 
         # 1. Process Attributes
         # Access the attribute group associated with the complex type
         if hasattr(elem.type, "attributes"):
             attr_fields = []
-            for attr_name, attr_obj in elem.type.attributes.items():
-                # Attributes are always scalars
-                attr_type = map_xsd_type_to_arrow(attr_obj.type)
-                fields.append(pa.field(elem.tag + attr_name, attr_type, nullable=True))
-
+            for attr in elem.type.attributes.values():
+                attr_xpath_key = tuple(xpath + [elem.local_name] + [attr.name] )
+                decode, pyarrow_type = map_xsd_type_to_arrow(attr.type)
+                attr_nullable = attr.use == "optional"
+                action_index[level][attr_xpath_key] = decode
+                fields.append(pa.field(elem.local_name + "@" + attr.name, pyarrow_type, nullable=attr_nullable))
 
         # 2. Process Child Elements
         if hasattr(elem.type, "content") and hasattr(
             elem.type.content, "iter_elements"
         ):
-
             for child_elem in elem.type.content.iter_elements():
-                child_type, child_nullable = convert_xsd_type(child_elem)
-                fields.append(pa.field(child_elem.name, child_type, nullable=child_nullable))
+                child_type, child_nullable = convert_xsd_type(child_elem, action_index, xpath + [elem.local_name])
+                fields.append(pa.field(child_elem.local_name, child_type, nullable=child_nullable))
             
         if elem.max_occurs is None or elem.max_occurs > 1:
+            action_index[level][xpath_key] = ElementTypeEnum.LIST
             return pa.list_(pa.struct(fields)), nullable
 
+        action_index[level][xpath_key] = ElementTypeEnum.DICT
         return pa.struct(fields), nullable
 
 
-def convert_xsd_to_pyarrow(xml_schema):
+def convert_xsd_to_pyarrow(xsd_schema, xpath):
     schema_fields = []
-    for name, elem in xml_schema.elements.items():
-        if not elem.is_global:
+    action_index = {}
+    for elem in xsd_schema.elements.values():
+
+        if not elem.is_global():
             continue
 
-        field_type, field_nullable = convert_xsd_type(elem)
-        schema_fields.append(pa.field(name, field_type, nullable=field_nullable))
+        field_type, field_nullable = convert_xsd_type(elem, action_index, xpath=[])
+        schema_fields.append(pa.field(elem.local_name, field_type, nullable=field_nullable))
 
-    return pa.schema(schema_fields)
+    pyarrow_schema = pa.schema(schema_fields)
 
+    # Each xml file should only have one root element
+    # However, we may have to merge different root elements across files.
+    # Make all root elements nullable to enable root schema merging.
+    if len(pyarrow_schema.names) > 1:
+        pyarrow_schema = pa.schema(
+            [column.with_nullable(True) for column in pyarrow_schema]
+        )
+
+    return pyarrow_schema, action_index
+
+
+def element_decode(elem_text, element_type):
+    # handles decoding element types to python types compatible with pyarrow types
+
+    if isinstance(element_type, tuple) and element_type[0] == ElementTypeEnum.LIST:
+        elem_list = elem_text.split(" ")
+        elem_list = [element_decode(elem_item, element_type[1]) for elem_item in elem_list]
+        return elem_list
+    elif element_type == ElementTypeEnum.DURATION:
+        dur = isodate.parse_duration(elem_text)
+        microseconds = int(dur.total_seconds() * 1_000_000)
+        return microseconds
+    elif element_type == ElementTypeEnum.TIMESTAMP:
+        return datetime.fromisoformat(elem_text)
+    elif element_type == ElementTypeEnum.TIME:
+        return datetime.strptime(elem_text, "%H:%M:%S%z").time()
+    elif element_type == ElementTypeEnum.GEGORIAN:
+        date_parts = elem_text.split("-")
+        date_len = len(date_parts)
+        """
+            <gYearMonthType>2026-06</gYearMonthType>
+            <gYearType>2026</gYearType>
+            <gMonthDayType>--06-23</gMonthDayType>
+            <gDayType>---23</gDayType>
+            <gMonthType>--06</gMonthType>
+        """
+        if date_len == 1:
+            return {"yyyy": int(date_parts[0])}
+        elif date_len == 2:
+            return {"yyyy": int(date_parts[0]), 'mm': int(date_parts[1])}
+        elif date_len == 3:
+            return {"mm": int(date_parts[2])}
+        elif date_len == 4:
+            if date_parts[2]:
+                return {"mm": int(date_parts[2]), 'dd': int(date_parts[3])}
+            else:
+                return {"dd": int(date_parts[3])}
+        return datetime.strptime(elem_text, "%H:%M:%S%z").time()
+    else:
+        return elem_text
