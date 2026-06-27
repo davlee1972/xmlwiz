@@ -18,6 +18,12 @@ if __name__ == "__main__":
         help="output format json or jsonl. Default is jsonl.",
     )
     parser.add_argument("-t", "--target_path", help="target path. Examples: /proj/test")
+    parser.add_argument(
+        "-r",
+        "--rows_per_batch",
+        default=10000,
+        help="number of rows to write per batch.",
+    )
     parser.add_argument("-z", "--zip", action="store_true", help="gzip output file")
     parser.add_argument("-p", "--xpath", help="xpath to parse out.")
     parser.add_argument(
@@ -51,6 +57,7 @@ if __name__ == "__main__":
     convert_xml(
         args.xsd_file,
         args.output_format,
+        args.rows_per_batch,
         args.target_path,
         args.zip,
         args.xpath,
