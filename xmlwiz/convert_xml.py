@@ -46,8 +46,8 @@ import pyarrow.parquet as pq
 import xmlschema
 from lxml import etree
 
-from xmlwiz.mappings import ElementTypeEnum, element_decode
-from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_pyarrow, build_action_items
+from xmlwiz.mappings import ElementTypeEnum
+from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_pyarrow, element_decode
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -76,7 +76,7 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml(input_file, action_index, xpath_items, rows_per_batch):
+def parse_xml(input_file, action_index, xpath_list, rows_per_batch):
 
     row_counter = 0
 
@@ -111,41 +111,37 @@ def parse_xml(input_file, action_index, xpath_items, rows_per_batch):
                 for k, v in elem.attrib.items():
                     k = etree.QName(k).localname
                     try:
-                        attr_type = action_index[current_level+1][tuple(current_xpath + [elem.tag + k])]
+                        attr_type = action_index[current_level][tuple(current_xpath + [k])]
                         elem_data = element_decode(v, attr_type)
-                        parent[elem.tag + k] = elem_data
+                        parent[elem.tag + "@" + k] = elem_data
                     except KeyError:
                         pass
             elif element_type == ElementTypeEnum.LIST:
                 if elem.tag not in parent:
-                    parent[elem.tag] = []
-                    old_parent = parent
-                    parent = parent[elem.tag]
-            elif element_type == ElementTypeEnum.LIST_OF_DICT:
-                if elem.tag not in parent:
                     parent[elem.tag] = [{}]
                     old_parent = parent
                     parent = parent[elem.tag][0]
-                    for k, v in elem.attrib.items():
-                        k = etree.QName(k).localname
-                        try:
-                            attr_type = action_index[current_level+1][tuple(current_xpath + [elem.tag + k])]
-                            elem_data = element_decode(v, attr_type)
-                            parent[elem.tag + k] = elem_data
-                        except KeyError:
-                            pass
                 else:
                     parent[elem.tag].append({})
                     parent = parent[elem.tag][-1]
+                for k, v in elem.attrib.items():
+                    k = etree.QName(k).localname
+                    try:
+                        attr_type = action_index[current_level][tuple(current_xpath + [k])]
+                        elem_data = element_decode(v, attr_type)
+                        parent[elem.tag + "@" + k] = elem_data
+                    except KeyError:
+                        pass
+
 
         elif event == "end":
+
             try:
                 element_type = action_index[current_level][tuple(current_xpath)]
 
                 if element_type in [
                     ElementTypeEnum.DICT,
                     ElementTypeEnum.LIST,
-                    ElementTypeEnum.LIST_OF_DICT,
                 ]:
                     parent = old_parent
                 else:
@@ -154,28 +150,43 @@ def parse_xml(input_file, action_index, xpath_items, rows_per_batch):
                     ]
 
                     elem_data = element_decode(elem.text, element_type)
+
                     if parent_type in [
                         ElementTypeEnum.DICT,
-                        ElementTypeEnum.LIST_OF_DICT,
+                        ElementTypeEnum.LIST,
                     ]:
                         parent[elem.tag] = elem_data
-                    elif parent_type == ElementTypeEnum.LIST:
-                        parent.append(elem_data)
             except KeyError:
                 pass
 
             elem.clear()
-            if current_xpath == xpath_items:
+            if current_xpath == xpath_list:
                 row_counter += 1
                 if row_counter == rows_per_batch:
                     yield result
-                    parent[elem.tag] = {}
+
+                    """Safely deletes a nested key using a list of sequential keys."""
+                    # Track our current location in the dictionary
+                    current = result
+                    
+                    # Drill down to the parent of the final target key
+                    for key in xpath_list[:-1]:
+                        if isinstance(current, dict) and key in current:
+                            current = current[key]
+                        else:
+                            break # Path does not exist
+                            
+                    # Safely remove the target key from the final dictionary level
+                    if isinstance(current, dict):
+                        del current[key_list[-1]]
+                    return False
+                    
                     row_counter = 0
             
             current_level -= 1
-            child = current_xpath.pop()
+            del current_xpath[-1]
 
-    if xpath_items:
+    if xpath_list:
         if row_counter:
             yield result
     else:
@@ -199,7 +210,7 @@ def write_json(
     zip,
     input_file,
     action_index,
-    xpath_items,
+    xpath_list,
     schema_type,
     processed,
     output_format,
@@ -213,9 +224,9 @@ def write_json(
         :return: data found and processed
         """
 
-        for xml_dict in parse_xml(xml_file, action_index, xpath_items, rows_per_batch):
-            if xpath_items:
-                xml_dict = reduce(dict.get, xpath_items, xml_dict)
+        for xml_dict in parse_xml(xml_file, action_index, xpath_list, rows_per_batch):
+            if xpath_list:
+                xml_dict = reduce(dict.get, xpath_list, xml_dict)
 
             if not xml_dict:
                 return processed
@@ -223,14 +234,10 @@ def write_json(
             arrow_obj = pa.array([xml_dict]).cast(schema_type)
 
             if pa.types.is_struct(arrow_obj.type):
-                names = arrow_obj.type.names
+                table = pa.Table.from_struct_array(arrow_obj)
             else:
-                names = arrow_obj.type.value_type.names
                 arrow_obj = arrow_obj.flatten()
-
-            table = pa.Table.from_arrays(
-                arrow_obj.flatten(), names=names
-            )
+                table = pa.Table.from_struct_array(arrow_obj)
 
             pylist = table.to_pylist()
 
@@ -284,7 +291,7 @@ def write_parquet(
     output_file,
     input_file,
     action_index,
-    xpath_items,
+    xpath_list,
     schema_type,
     processed,
     rows_per_batch,
@@ -298,10 +305,10 @@ def write_parquet(
         :return: data found and processed
         """
 
-        for xml_dict in parse_xml(xml_file, action_index, xpath_items, rows_per_batch):
+        for xml_dict in parse_xml(xml_file, action_index, xpath_list, rows_per_batch):
 
-            if xpath_items:
-                xml_dict = reduce(dict.get, xpath_items, xml_dict)
+            if xpath_list:
+                xml_dict = reduce(dict.get, xpath_list, xml_dict)
 
             if not xml_dict:
                 return processed
@@ -309,15 +316,11 @@ def write_parquet(
             arrow_obj = pa.array([xml_dict]).cast(schema_type)
 
             if pa.types.is_struct(arrow_obj.type):
-                names = arrow_obj.type.names
+                table = pa.Table.from_struct_array(arrow_obj)
             else:
-                names = arrow_obj.type.value_type.names
                 arrow_obj = arrow_obj.flatten()
-
-            table = pa.Table.from_arrays(
-                arrow_obj.flatten(), names=names
-            )
-
+                table = pa.Table.from_struct_array(arrow_obj)
+            
             if table.num_rows > 0:
                 writer.write_table(table)
                 processed = True
@@ -356,23 +359,6 @@ def write_parquet(
         return processed
 
 
-def set_unqualified_form(xsd_file_contents):
-    # Parse the XSD file
-    root = etree.fromstring(xsd_file_contents.encode("utf-8"))
-    
-    # Define the W3C XML Schema namespace (required for tag matching)
-    xs_ns = "{http://www.w3.org/2001/XMLSchema}"
-    
-    # Check if the root tag is 'schema' and add the attribute
-    if root.tag == f"{xs_ns}schema":
-        root.set("elementFormDefault", "unqualified")
-        
-        # Save the updated XSD back to the file
-        return etree.tostring(root, encoding="utf-8", xml_declaration=True)
-    else:
-        raise TypeError("Root element is not an xs:schema")
-
-
 def parse_file(
     input_file,
     output_file,
@@ -396,56 +382,37 @@ def parse_file(
 
     processed = False
 
-    with open(xsd_file) as f:
-        xsd_file_contents = f.read()
-    
-    xsd_file_contents = set_unqualified_form(xsd_file_contents)
-
-    xml_schema = xmlschema.XMLSchema11(xsd_file_contents)
-    pyarrow_schema = convert_xsd_to_pyarrow(xml_schema)
-
-    # Each xml file should only have one root element, but have to merge different root elements across files.
-    if len(pyarrow_schema.names) > 1:
-        pyarrow_schema = pa.schema(
-            [column.with_nullable(True) for column in pyarrow_schema]
-        )
+    xml_schema = xmlschema.XMLSchema11(xsd_file)
+    pyarrow_schema, action_index = convert_xsd_to_pyarrow(xml_schema, [])
 
     schema_type = pa.struct(pyarrow_schema)
 
-    action_items = build_action_items(pyarrow_schema, [], xml_schema)
+    xpath_list = None
 
-    action_index = {}
-    for k, v in action_items.items():
-        level = len(k)
-        if level not in action_index:
-            action_index[level] = {}
-        action_index[level][k] = v
-
-    xpath_items = None
     new_action_index = action_index
 
     if xpath:
-        xpath_items = xpath.split("/")
-        xpath_items = xpath_items[1:]
+        xpath_list = xpath.split("/")
+        xpath_list = xpath_list[1:]
 
         current_type = pyarrow_schema
-        for column in xpath_items:
+        for column in xpath_list:
             current_field = current_type.field(column)
             current_type = current_field.type
         schema_type = current_type
 
-        xpath_count = len(xpath_items)
-        xpath_key = tuple(xpath_items)
         new_action_index = {}
 
         for i, v in action_index.items():
             new_items = {}
-            if i > xpath_count:
-                new_items = {
-                    k2: v2 for k2, v2 in v.items() if k2[:xpath_count] == xpath_key
-                }
-            else:
-                new_items = {k2: v2 for k2, v2 in v.items() if k2 == xpath_key[:i]}
+            for k, v2 in v.items():
+                if i <= len(xpath_list):
+                    if k == tuple(xpath_list[:len(k)]):
+                        new_items[k] = v2
+                    elif k[:i] == tuple(xpath_list[:i]) and len(k) > i:
+                        new_items[k] = v2
+                elif k[:len(xpath_list)] == tuple(xpath_list):
+                    new_items[k] = v2
 
             if new_items:
                 new_action_index[i] = new_items
@@ -459,7 +426,7 @@ def parse_file(
             zip,
             input_file,
             new_action_index,
-            xpath_items,
+            xpath_list,
             schema_type,
             processed,
             output_format,
@@ -471,7 +438,7 @@ def parse_file(
             output_file,
             input_file,
             new_action_index,
-            xpath_items,
+            xpath_list,
             schema_type,
             processed,
             rows_per_batch=10000,
