@@ -1,7 +1,7 @@
 #
 # MIT License
 #
-# $Copyright (c) 2026 David Lee
+# Copyright (c) 2026 David Lee
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -344,7 +344,7 @@ def write_parquet(
             if not xml_dict:
                 return processed
 
-            arrow_obj = pa.array([xml_dict]).cast(schema_type)
+            arrow_obj = pa.array(xml_dict).cast(schema_type)
 
             if pa.types.is_struct(arrow_obj.type):
                 table = pa.Table.from_struct_array(arrow_obj)
