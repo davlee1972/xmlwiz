@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- python xml_wiz.py -o jsonl -t . -x .\test\data\company_complex.xsd .\test\data\company_complex.xml -->
+<!-- python xml_wiz.py -o jsonl -p /company -t . -x .\test\data\company_complex.xsd .\test\data\company_complex.xml -->
+<!-- python xml_wiz.py -o jsonl -p /company/companyInfo -t . -x .\test\data\company_complex.xsd .\test\data\company_complex.xml -->
+<!-- python xml_wiz.py -o jsonl -p /company/departments -t . -x .\test\data\company_complex.xsd .\test\data\company_complex.xml -->
+<!-- python xml_wiz.py -o jsonl -p /company/departments/department/subDepartments/department/employees -t . -x .\test\data\company_complex.xsd .\test\data\company_complex.xml -->
+
+<company xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="company_complex.xsd">
+   <companyInfo>
+      <name>TechCorp International</name>
+      <founded>2010-05-15</founded>
+   </companyInfo>
+   <departments>
+      <department deptID="D-100">
+         <title>Research and Development</title>
+         <budget currency="USD">5000000</budget>
+         <employees>
+            <employee empID="E-001" type="FullTime">
+               <personalDetails>
+                  <firstName>Jane</firstName>
+                  <lastName>Doe</lastName>
+                  <contact>
+                     <email>jane.doe@techcorp.com</email>
+                     <phone type="work">555-0192</phone>
+                  </contact>
+               </personalDetails>
+               <role>Senior Architect</role>
+               <projects>
+                  <project projectID="P-88">
+                     <projectName>Project Nebula</projectName>
+                     <status>Active</status>
+                  </project>
+                  <project projectID="P-92">
+                     <projectName>Project Horizon</projectName>
+                     <status>Pending</status>
+                  </project>
+               </projects>
+            </employee>
+         </employees>
+         <subDepartments>
+            <department deptID="D-101">
+               <title>AI Research</title>
+               <budget currency="USD">2000000</budget>
+               <employees>
+                  <employee empID="E-001" type="Contractor">
+                     <personalDetails>
+                        <firstName>John</firstName>
+                        <lastName>Smith</lastName>
+                        <contact>
+                           <email>john.smith@contractor.com</email>
+                           <phone type="mobile">555-0288</phone>
+                        </contact>
+                     </personalDetails>
+                     <role>ML Engineer</role>
+                     <projects>
+                        <project projectID="P-88">
+                           <projectName>Project Nebula</projectName>
+                           <status>Active</status>
+                        </project>
+                     </projects>
+                  </employee>
+               </employees>
+               <subDepartments/>
+            </department>
+            <department deptID="D-102">
+               <title>AI Research</title>
+               <budget currency="USD2">20000002</budget>
+               <employees>
+                  <employee empID="E-002" type="Contractor2">
+                     <personalDetails>
+                        <firstName>John2</firstName>
+                        <lastName>Smith2</lastName>
+                        <contact>
+                           <email>john2.smith2@contractor.com</email>
+                           <phone type="mobile">555-02882</phone>
+                        </contact>
+                     </personalDetails>
+                     <role>ML Engineer2</role>
+                     <projects>
+                        <project projectID="P-882">
+                           <projectName>Project Nebula2</projectName>
+                           <status>Active2</status>
+                        </project>
+                     </projects>
+                  </employee>
+                  <employee empID="E-003" type="Contractor3">
+                     <personalDetails>
+                        <firstName>John3</firstName>
+                        <lastName>Smith3</lastName>
+                        <contact>
+                           <email>john3.smith3@contractor.com</email>
+                           <phone type="mobile">555-02883</phone>
+                        </contact>
+                     </personalDetails>
+                     <role>ML Engineer3</role>
+                     <projects>
+                        <project projectID="P-883">
+                           <projectName>Project Nebula3</projectName>
+                           <status>Active3</status>
+                        </project>
+                     </projects>
+                  </employee>
+               </employees>
+               <subDepartments/>
+            </department>
+         </subDepartments>
+      </department>
+   </departments>
+</company>
