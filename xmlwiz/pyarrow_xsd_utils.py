@@ -51,7 +51,7 @@ def map_xsd_type_to_arrow(xsd_type):
     )  # Fallback to string for unknown primitives
 
 
-def convert_xsd_type(elem, action_index, xpath):
+def convert_xsd_type(elem, action_index, xpath, elem_type_list):
     # Handle simple types (scalars)
 
     nullable = elem.min_occurs == 0
@@ -77,7 +77,7 @@ def convert_xsd_type(elem, action_index, xpath):
             for attr in elem.type.attributes.values():
                 attr_xpath_key = tuple(xpath + [elem.local_name] + [attr.name] )
                 decode, pyarrow_type = map_xsd_type_to_arrow(attr.type)
-                attr_nullable = attr.use == "optional"
+                attr_nullable = attr.use != "required"
                 action_index[level][attr_xpath_key] = decode
                 fields.append(pa.field(elem.local_name + "@" + attr.name, pyarrow_type, nullable=attr_nullable))
 
@@ -85,10 +85,20 @@ def convert_xsd_type(elem, action_index, xpath):
         if hasattr(elem.type, "content") and hasattr(
             elem.type.content, "iter_elements"
         ):
+            # prevents recursion using a depth of 2
+            if elem_type_list.count(elem.type.name) >= 2:
+                return None, None
+
+            if elem.type.name:
+                elem_type_list.append(elem.type.name)
             for child_elem in elem.type.content.iter_elements():
-                child_type, child_nullable = convert_xsd_type(child_elem, action_index, xpath + [elem.local_name])
-                fields.append(pa.field(child_elem.local_name, child_type, nullable=child_nullable))
-            
+                child_type, child_nullable = convert_xsd_type(child_elem, action_index, xpath + [elem.local_name], elem_type_list)
+                if child_type:
+                    fields.append(pa.field(child_elem.local_name, child_type, nullable=child_nullable))
+
+        if not fields:
+            return None, None
+
         if elem.max_occurs is None or elem.max_occurs > 1:
             action_index[level][xpath_key] = ElementTypeEnum.LIST
             return pa.list_(pa.struct(fields)), nullable
@@ -105,7 +115,7 @@ def convert_xsd_to_pyarrow(xsd_schema, xpath):
         if not elem.is_global():
             continue
 
-        field_type, field_nullable = convert_xsd_type(elem, action_index, xpath=[])
+        field_type, field_nullable = convert_xsd_type(elem, action_index, xpath=[], elem_type_list=[])
         schema_fields.append(pa.field(elem.local_name, field_type, nullable=field_nullable))
 
     pyarrow_schema = pa.schema(schema_fields)

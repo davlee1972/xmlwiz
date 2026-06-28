@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+   <!-- Contact details type -->
+   <xs:complexType name="ContactType">
+      <xs:sequence>
+         <xs:element name="email" type="xs:string"/>
+         <xs:element name="phone">
+            <xs:complexType>
+               <xs:simpleContent>
+                  <xs:extension base="xs:string">
+                     <xs:attribute name="type" type="xs:string" use="required"/>
+                  </xs:extension>
+               </xs:simpleContent>
+            </xs:complexType>
+         </xs:element>
+      </xs:sequence>
+   </xs:complexType>
+
+   <!-- Personal Details type -->
+   <xs:complexType name="PersonalDetailsType">
+      <xs:sequence>
+         <xs:element name="firstName" type="xs:string"/>
+         <xs:element name="lastName" type="xs:string"/>
+         <xs:element name="contact" type="ContactType"/>
+      </xs:sequence>
+   </xs:complexType>
+
+   <!-- Project type -->
+   <xs:complexType name="ProjectType">
+      <xs:sequence>
+         <xs:element name="projectName" type="xs:string"/>
+         <xs:element name="status">
+            <xs:simpleType>
+               <xs:restriction base="xs:string">
+                  <xs:enumeration value="Active"/>
+                  <xs:enumeration value="Pending"/>
+                  <xs:enumeration value="Completed"/>
+               </xs:restriction>
+            </xs:simpleType>
+         </xs:element>
+      </xs:sequence>
+      <xs:attribute name="projectID" type="xs:string" use="required"/>
+   </xs:complexType>
+
+   <!-- Employee type -->
+   <xs:complexType name="EmployeeType">
+      <xs:sequence>
+         <xs:element name="personalDetails" type="PersonalDetailsType"/>
+         <xs:element name="role" type="xs:string"/>
+         <xs:element name="projects">
+            <xs:complexType>
+               <xs:sequence>
+                  <xs:element name="project" type="ProjectType" maxOccurs="unbounded"/>
+               </xs:sequence>
+            </xs:complexType>
+         </xs:element>
+      </xs:sequence>
+      <xs:attribute name="empID" type="xs:string" use="required"/>
+      <xs:attribute name="type" type="xs:string" use="required"/>
+   </xs:complexType>
+
+   <!-- Recursive Department type -->
+   <xs:complexType name="DepartmentType">
+      <xs:sequence>
+         <xs:element name="title" type="xs:string"/>
+         <xs:element name="budget">
+            <xs:complexType>
+               <xs:simpleContent>
+                  <xs:extension base="xs:decimal">
+                     <xs:attribute name="currency" type="xs:string" use="required"/>
+                  </xs:extension>
+               </xs:simpleContent>
+            </xs:complexType>
+         </xs:element>
+         <xs:element name="employees" minOccurs="0">
+            <xs:complexType>
+               <xs:sequence>
+                  <xs:element name="employee" type="EmployeeType" maxOccurs="unbounded"/>
+               </xs:sequence>
+            </xs:complexType>
+         </xs:element>
+         <xs:element name="subDepartments" minOccurs="0">
+            <xs:complexType>
+               <xs:sequence>
+                  <xs:element name="department" type="DepartmentType" minOccurs="0" maxOccurs="unbounded"/>
+               </xs:sequence>
+            </xs:complexType>
+         </xs:element>
+      </xs:sequence>
+      <xs:attribute name="deptID" type="xs:string" use="required"/>
+   </xs:complexType>
+
+   <!-- Root element definition -->
+   <xs:element name="company">
+      <xs:complexType>
+         <xs:sequence>
+            <xs:element name="companyInfo">
+               <xs:complexType>
+                  <xs:sequence>
+                     <xs:element name="name" type="xs:string"/>
+                     <xs:element name="founded" type="xs:date"/>
+                  </xs:sequence>
+               </xs:complexType>
+            </xs:element>
+            <xs:element name="departments">
+               <xs:complexType>
+                  <xs:sequence>
+                     <xs:element name="department" type="DepartmentType" maxOccurs="unbounded"/>
+                  </xs:sequence>
+               </xs:complexType>
+            </xs:element>
+         </xs:sequence>
+      </xs:complexType>
+   </xs:element>
+
+</xs:schema>

@@ -79,23 +79,20 @@ def json_decoder(obj):
 
 class TrackerTypeEnum(IntEnum):
     ELEMENT_TYPE = 0
-    PARENT_TYPE = 1
+    PARENT = 1
     OBJ = 2
+
 
 def parse_xml_file(xml_file, action_index, xpath_list, rows_per_batch):
 
-
     row_counter = 0
 
-    tracker_index = {0:{():[ElementTypeEnum.DICT, None, {}]}}
+    tracker_index = {0:{():[ElementTypeEnum.DICT, None, None]}}
     for i, v in action_index.items():
         tracker_subtree = {}
         for k, v2 in v.items():
             if len(k) == i:
-                if i == 1:
-                    tracker_subtree[k] = [v2, ElementTypeEnum.DICT, None]
-                else:
-                    tracker_subtree[k] = [v2, action_index[i-1][k[:len(k)-1]], None]
+                tracker_subtree[k] = [v2, tracker_index[i - 1][k[:-1]], None]
         if tracker_subtree:
             tracker_index[i] = tracker_subtree
 
@@ -119,7 +116,7 @@ def parse_xml_file(xml_file, action_index, xpath_list, rows_per_batch):
 
             current_xpath_key = tuple(current_xpath)
             try:
-                [element_type, parent_type, obj] = tracker_index[current_level][tuple(current_xpath_key)]
+                [element_type, parent, obj] = tracker_index[current_level][tuple(current_xpath_key)]
             except KeyError:
                 continue
 
@@ -141,7 +138,7 @@ def parse_xml_file(xml_file, action_index, xpath_list, rows_per_batch):
         elif event == "end":
             current_xpath_key = tuple(current_xpath)
             try:
-                [element_type, parent_type, obj] = tracker_index[current_level][current_xpath_key]
+                [element_type, parent, obj] = tracker_index[current_level][current_xpath_key]
             except KeyError:
                 elem.clear()            
                 current_level -= 1
@@ -153,53 +150,75 @@ def parse_xml_file(xml_file, action_index, xpath_list, rows_per_batch):
             else:
                 data = element_decode(elem.text, element_type)
 
-            parent_tracker = tracker_index[current_level-1][current_xpath_key[:-1]]
             # flush data to parent
             if data:
-                if parent_tracker[TrackerTypeEnum.OBJ] is None:
-                    parent_tracker[TrackerTypeEnum.OBJ] = {}
+                if parent[TrackerTypeEnum.OBJ] is None:
+                    parent[TrackerTypeEnum.OBJ] = {}
 
                 if element_type == ElementTypeEnum.DICT:
-                    parent_tracker[TrackerTypeEnum.OBJ][elem.tag] = obj
+                    parent[TrackerTypeEnum.OBJ][elem.tag] = data.copy()
+                    tracker_index[current_level][current_xpath_key][TrackerTypeEnum.OBJ] = None
                 elif element_type == ElementTypeEnum.LIST:
-                    if elem.tag not in parent_tracker[TrackerTypeEnum.OBJ]:
-                        parent_tracker[TrackerTypeEnum.OBJ][elem.tag] = []
-                    parent_tracker[TrackerTypeEnum.OBJ][elem.tag].append(data)
+                    if elem.tag not in parent[TrackerTypeEnum.OBJ]:
+                        parent[TrackerTypeEnum.OBJ][elem.tag] = []
+                    parent[TrackerTypeEnum.OBJ][elem.tag].append(data.copy())
                     tracker_index[current_level][current_xpath_key][TrackerTypeEnum.OBJ] = None
                 else:
-                    if parent_tracker[TrackerTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.DICT:
-                        parent_tracker[TrackerTypeEnum.OBJ].update({elem.tag: data})
-                    elif parent_tracker[TrackerTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.LIST:
-                        parent_tracker[TrackerTypeEnum.OBJ].update({elem.tag: data})
+                    parent[TrackerTypeEnum.OBJ].update({elem.tag: data})
 
             if current_xpath == xpath_list:
                 row_counter += 1
                 if row_counter == rows_per_batch:
-                    for i, v in tracker_index.items():
-                        if i < len(xpath_list):
-                            for k2, v2 in v.items():
-                                if k2 == tuple(xpath_list[:-1]):
-                                    yield v2[TrackerTypeEnum.OBJ][xpath_list[-1]]
-                    t_index = len(xpath_list) - 1
-                    t_key = tuple(xpath_list[:-1])
-                    tracker_index[t_index][t_key][TrackerTypeEnum.OBJ] = None
+                    # flush all child data up to root
+                    for xpath in reversed(xpath_list[:-1]):
+                        if parent[TrackerTypeEnum.PARENT][TrackerTypeEnum.OBJ] is None:
+                            parent[TrackerTypeEnum.PARENT][TrackerTypeEnum.OBJ] = {}
+                        if xpath not in parent[TrackerTypeEnum.PARENT][TrackerTypeEnum.OBJ]:
+                            if parent[TrackerTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.DICT:
+                                parent[TrackerTypeEnum.PARENT][TrackerTypeEnum.OBJ][xpath] = {}
+                            elif parent[TrackerTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.LIST:
+                                parent[TrackerTypeEnum.PARENT][TrackerTypeEnum.OBJ][xpath] = []
+
+
+                        if parent[TrackerTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.DICT:
+                            parent[TrackerTypeEnum.PARENT][TrackerTypeEnum.OBJ][xpath] = parent[TrackerTypeEnum.OBJ].copy()
+                        elif parent[TrackerTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.LIST:                            
+                            parent[TrackerTypeEnum.PARENT][TrackerTypeEnum.OBJ][xpath].append(parent[TrackerTypeEnum.OBJ].copy())
+                        parent[TrackerTypeEnum.OBJ] = None                            
+
+                        parent = parent[TrackerTypeEnum.PARENT]
+
+                    results = [tracker_index[0][()][TrackerTypeEnum.OBJ]]
+                    for xpath in xpath_list:
+                        try:
+                            results = [row[xpath] for row in results]
+                        except:
+                            results =[childrow2[xpath] for childrow2 in [childrow for row in results for childrow in row]]
+                    yield results
+
+                    #t_index = len(xpath_list) - 1
+                    #t_key = tuple(xpath_list[:-1])
+                    #tracker_index[t_index][t_key][TrackerTypeEnum.OBJ] = None
 
                     row_counter = 0
+
             elem.clear()            
             current_level -= 1
             del current_xpath[-1]
 
-    
-    if xpath_list and row_counter:
-        for i, v in tracker_index.items():
-            if i < len(xpath_list):
-                for k2, v2 in v.items():
-                    if k2 == tuple(xpath_list[:-1]):
-                        yield v2[TrackerTypeEnum.OBJ][xpath_list[-1]]
+    if rows_per_batch and row_counter == 0:
+        return
 
+    results = [tracker_index[0][()][TrackerTypeEnum.OBJ]]
+    if xpath_list:
+        for xpath in xpath_list:
+            try:
+                results = [row[xpath] for row in results]
+            except:
+                results =[childrow2[xpath] for childrow2 in [childrow for row in results for childrow in row]]
+        yield results
     else:
-        yield tracker_index[0][()][TrackerTypeEnum.OBJ]
-
+        yield results
 
 def open_zip_file(zip, filename):
     """
@@ -237,7 +256,16 @@ def write_json(
             if not xml_dict:
                 return processed
 
-            arrow_obj = pa.array([xml_dict]).cast(schema_type)
+            #print(xml_dict)
+            #if pa.types.is_struct(schema_type):
+            #    pyarrow_schema = pa.schema(schema_type)
+            #else:
+            #    pyarrow_schema = pa.schema(schema_type.value_type)
+
+            # print(pyarrow_schema.to_string)
+            #print("====================")
+
+            arrow_obj = pa.array(xml_dict).cast(schema_type)
 
             if pa.types.is_struct(arrow_obj.type):
                 table = pa.Table.from_struct_array(arrow_obj)
@@ -401,7 +429,10 @@ def parse_file(
 
         current_type = pyarrow_schema
         for column in xpath_list:
-            current_field = current_type.field(column)
+            try:
+                current_field = current_type.field(column)
+            except:
+                current_field = current_type.value_type.field(column)
             current_type = current_field.type
         schema_type = current_type
 
