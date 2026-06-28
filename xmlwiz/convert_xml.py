@@ -27,6 +27,7 @@ import sys
 import subprocess
 from multiprocessing import Pool
 import logging
+from enum import IntEnum
 
 from datetime import datetime, date, time, timedelta
 import decimal
@@ -76,18 +77,33 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml(input_file, action_index, xpath_list, rows_per_batch):
+class TrackerTypeEnum(IntEnum):
+    ELEMENT_TYPE = 0
+    PARENT_TYPE = 1
+    OBJ = 2
+
+def parse_xml_file(xml_file, action_index, xpath_list, rows_per_batch):
+
 
     row_counter = 0
 
-    result = {}
-    parent = result
+    tracker_index = {0:{():[ElementTypeEnum.DICT, None, {}]}}
+    for i, v in action_index.items():
+        tracker_subtree = {}
+        for k, v2 in v.items():
+            if len(k) == i:
+                if i == 1:
+                    tracker_subtree[k] = [v2, ElementTypeEnum.DICT, None]
+                else:
+                    tracker_subtree[k] = [v2, action_index[i-1][k[:len(k)-1]], None]
+        if tracker_subtree:
+            tracker_index[i] = tracker_subtree
 
     current_xpath = []
     current_level = 0
 
     context = etree.iterparse(
-        input_file,
+        xml_file,
         events=(
             "start",
             "end",
@@ -96,101 +112,93 @@ def parse_xml(input_file, action_index, xpath_list, rows_per_batch):
 
     for event, elem in context:
         elem.tag = etree.QName(elem.tag).localname
+
         if event == "start":
             current_xpath.append(elem.tag)
             current_level += 1
+
+            current_xpath_key = tuple(current_xpath)
             try:
-                element_type = action_index[current_level][tuple(current_xpath)]
+                [element_type, parent_type, obj] = tracker_index[current_level][tuple(current_xpath_key)]
             except KeyError:
                 continue
 
-            if element_type == ElementTypeEnum.DICT:
-                parent[elem.tag] = {}
-                old_parent = parent
-                parent = parent[elem.tag]
+            if element_type in [ElementTypeEnum.DICT, ElementTypeEnum.LIST]:
+                attributes = {}
                 for k, v in elem.attrib.items():
                     k = etree.QName(k).localname
                     try:
                         attr_type = action_index[current_level][tuple(current_xpath + [k])]
-                        elem_data = element_decode(v, attr_type)
-                        parent[elem.tag + "@" + k] = elem_data
+                        attr_data = element_decode(v, attr_type)
+                        attributes[elem.tag + "@" + k] = attr_data
                     except KeyError:
                         pass
-            elif element_type == ElementTypeEnum.LIST:
-                if elem.tag not in parent:
-                    parent[elem.tag] = [{}]
-                    old_parent = parent
-                    parent = parent[elem.tag][0]
-                else:
-                    parent[elem.tag].append({})
-                    parent = parent[elem.tag][-1]
-                for k, v in elem.attrib.items():
-                    k = etree.QName(k).localname
-                    try:
-                        attr_type = action_index[current_level][tuple(current_xpath + [k])]
-                        elem_data = element_decode(v, attr_type)
-                        parent[elem.tag + "@" + k] = elem_data
-                    except KeyError:
-                        pass
-
+                if attributes:
+                    if obj is None:
+                        tracker_index[current_level][tuple(current_xpath_key)][TrackerTypeEnum.OBJ] = {}
+                    tracker_index[current_level][tuple(current_xpath_key)][TrackerTypeEnum.OBJ].update(attributes)
 
         elif event == "end":
-
+            current_xpath_key = tuple(current_xpath)
             try:
-                element_type = action_index[current_level][tuple(current_xpath)]
-
-                if element_type in [
-                    ElementTypeEnum.DICT,
-                    ElementTypeEnum.LIST,
-                ]:
-                    parent = old_parent
-                else:
-                    parent_type = action_index[current_level - 1][
-                        tuple(current_xpath[:-1])
-                    ]
-
-                    elem_data = element_decode(elem.text, element_type)
-
-                    if parent_type in [
-                        ElementTypeEnum.DICT,
-                        ElementTypeEnum.LIST,
-                    ]:
-                        parent[elem.tag] = elem_data
+                [element_type, parent_type, obj] = tracker_index[current_level][current_xpath_key]
             except KeyError:
-                pass
+                elem.clear()            
+                current_level -= 1
+                del current_xpath[-1]
+                continue
 
-            elem.clear()
+            if element_type in [ElementTypeEnum.DICT, ElementTypeEnum.LIST]:
+                data = obj
+            else:
+                data = element_decode(elem.text, element_type)
+
+            parent_tracker = tracker_index[current_level-1][current_xpath_key[:-1]]
+            # flush data to parent
+            if data:
+                if parent_tracker[TrackerTypeEnum.OBJ] is None:
+                    parent_tracker[TrackerTypeEnum.OBJ] = {}
+
+                if element_type == ElementTypeEnum.DICT:
+                    parent_tracker[TrackerTypeEnum.OBJ][elem.tag] = obj
+                elif element_type == ElementTypeEnum.LIST:
+                    if elem.tag not in parent_tracker[TrackerTypeEnum.OBJ]:
+                        parent_tracker[TrackerTypeEnum.OBJ][elem.tag] = []
+                    parent_tracker[TrackerTypeEnum.OBJ][elem.tag].append(data)
+                    tracker_index[current_level][current_xpath_key][TrackerTypeEnum.OBJ] = None
+                else:
+                    if parent_tracker[TrackerTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.DICT:
+                        parent_tracker[TrackerTypeEnum.OBJ].update({elem.tag: data})
+                    elif parent_tracker[TrackerTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.LIST:
+                        parent_tracker[TrackerTypeEnum.OBJ].update({elem.tag: data})
+
             if current_xpath == xpath_list:
                 row_counter += 1
                 if row_counter == rows_per_batch:
-                    yield result
+                    for i, v in tracker_index.items():
+                        if i < len(xpath_list):
+                            for k2, v2 in v.items():
+                                if k2 == tuple(xpath_list[:-1]):
+                                    yield v2[TrackerTypeEnum.OBJ][xpath_list[-1]]
+                    t_index = len(xpath_list) - 1
+                    t_key = tuple(xpath_list[:-1])
+                    tracker_index[t_index][t_key][TrackerTypeEnum.OBJ] = None
 
-                    """Safely deletes a nested key using a list of sequential keys."""
-                    # Track our current location in the dictionary
-                    current = result
-                    
-                    # Drill down to the parent of the final target key
-                    for key in xpath_list[:-1]:
-                        if isinstance(current, dict) and key in current:
-                            current = current[key]
-                        else:
-                            break # Path does not exist
-                            
-                    # Safely remove the target key from the final dictionary level
-                    if isinstance(current, dict):
-                        del current[xpath_list[-1]]
-                    return False
-                    
                     row_counter = 0
-            
+            elem.clear()            
             current_level -= 1
             del current_xpath[-1]
 
-    if xpath_list:
-        if row_counter:
-            yield result
+    
+    if xpath_list and row_counter:
+        for i, v in tracker_index.items():
+            if i < len(xpath_list):
+                for k2, v2 in v.items():
+                    if k2 == tuple(xpath_list[:-1]):
+                        yield v2[TrackerTypeEnum.OBJ][xpath_list[-1]]
+
     else:
-        yield result
+        yield tracker_index[0][()][TrackerTypeEnum.OBJ]
 
 
 def open_zip_file(zip, filename):
@@ -217,16 +225,14 @@ def write_json(
     rows_per_batch,
 ):
 
-    def parse_xml_to_json(xml_file, processed):
+    def write_xml_to_json(xml_file, processed):
         """
         :param xml_file: xml file
         :param processed: whether data has been found and processed
         :return: data found and processed
         """
 
-        for xml_dict in parse_xml(xml_file, action_index, xpath_list, rows_per_batch):
-            if xpath_list:
-                xml_dict = reduce(dict.get, xpath_list, xml_dict)
+        for xml_dict in parse_xml_file(xml_file, action_index, xpath_list, rows_per_batch):
 
             if not xml_dict:
                 return processed
@@ -255,7 +261,7 @@ def write_json(
         return processed
 
     with open_zip_file(zip, output_file) as file_obj:
-        if input_file.endswith((".zip", ".tar.gz")) and output_format == "json":
+        if output_format == "json":
             file_obj.write(bytes("[" + os.linesep, "utf-8"))
 
         if input_file.endswith(".tar.gz"):
@@ -264,7 +270,7 @@ def write_json(
 
             for member in zip_file_list:
                 with zip_file.extractfile(member) as xml_file:
-                    processed = parse_xml_to_json(xml_file, processed)
+                    processed = write_xml_to_json(xml_file, processed)
 
         elif input_file.endswith(".zip"):
             zip_file = ZipFile(input_file, "r")
@@ -272,16 +278,16 @@ def write_json(
 
             for i in range(len(zip_file_list)):
                 with zip_file.open(zip_file_list[i].filename) as xml_file:
-                    processed = parse_xml_to_json(xml_file, processed)
+                    processed = write_xml_to_json(xml_file, processed)
 
         elif input_file.endswith(".gz"):
             with gzip.open(input_file) as xml_file:
-                processed = parse_xml_to_json(xml_file, processed)
+                processed = write_xml_to_json(xml_file, processed)
 
         else:
-            processed = parse_xml_to_json(input_file, processed)
+            processed = write_xml_to_json(input_file, processed)
 
-        if input_file.endswith((".zip", ".tar.gz")) and output_format == "json":
+        if output_format == "json":
             file_obj.write(bytes(os.linesep + "]", "utf-8"))
 
         return processed
@@ -297,7 +303,7 @@ def write_parquet(
     rows_per_batch,
 ):
 
-    def parse_xml_to_parquet(xml_file, processed):
+    def write_xml_to_parquet(xml_file, processed):
         """
         :param xml_file: xml file
         :param pyarrow_schema: PyArrow schema
@@ -305,10 +311,7 @@ def write_parquet(
         :return: data found and processed
         """
 
-        for xml_dict in parse_xml(xml_file, action_index, xpath_list, rows_per_batch):
-
-            if xpath_list:
-                xml_dict = reduce(dict.get, xpath_list, xml_dict)
+        for xml_dict in parse_xml_file(xml_file, action_index, xpath_list, rows_per_batch):
 
             if not xml_dict:
                 return processed
@@ -339,7 +342,7 @@ def write_parquet(
 
             for member in zip_file_list:
                 with zip_file.extractfile(member) as xml_file:
-                    processed = parse_xml_to_parquet(xml_file, processed)
+                    processed = write_xml_to_parquet(xml_file, processed)
 
         elif input_file.endswith(".zip"):
             zip_file = ZipFile(input_file, "r")
@@ -347,14 +350,14 @@ def write_parquet(
 
             for i in range(len(zip_file_list)):
                 with zip_file.open(zip_file_list[i].filename) as xml_file:
-                    processed = parse_xml_to_parquet(xml_file, processed)
+                    processed = write_xml_to_parquet(xml_file, processed)
 
         elif input_file.endswith(".gz"):
             with gzip.open(input_file) as xml_file:
-                processed = parse_xml_to_parquet(xml_file, processed)
+                processed = write_xml_to_parquet(xml_file, processed)
 
         else:
-            processed = parse_xml_to_parquet(input_file, processed)
+            processed = write_xml_to_parquet(input_file, processed)
 
         return processed
 
@@ -485,8 +488,6 @@ def convert_xml(
     :param xml_files: list of xml_files
 
     """
-
-    print(rows_per_batch)
 
     formatter = logging.Formatter(
         "%(levelname)s - %(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
