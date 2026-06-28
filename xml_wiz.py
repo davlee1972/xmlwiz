@@ -21,6 +21,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-r",
         "--rows_per_batch",
+        type=int,
         default=10000,
         help="number of rows to write per batch.",
     )
