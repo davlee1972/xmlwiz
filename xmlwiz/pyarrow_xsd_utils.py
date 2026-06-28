@@ -77,7 +77,10 @@ def convert_xsd_type(elem, action_index, xpath, elem_type_list):
             for attr in elem.type.attributes.values():
                 attr_xpath_key = tuple(xpath + [elem.local_name] + [attr.name] )
                 decode, pyarrow_type = map_xsd_type_to_arrow(attr.type)
-                attr_nullable = attr.use != "required"
+                if nullable:
+                    attr_nullable = nullable
+                else:
+                    attr_nullable = attr.use != "required"
                 action_index[level][attr_xpath_key] = decode
                 fields.append(pa.field(elem.local_name + "@" + attr.name, pyarrow_type, nullable=attr_nullable))
 
