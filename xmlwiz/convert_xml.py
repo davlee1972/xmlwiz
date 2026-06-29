@@ -83,16 +83,7 @@ class TrackerTypeEnum(IntEnum):
     OBJ = 2
 
 
-def parse_xml_file(xml_file, action_index, xpath_list):
-
-    tracker_index = {0:{():[ElementTypeEnum.DICT, None, None]}}
-    for i, v in action_index.items():
-        tracker_subtree = {}
-        for k, v2 in v.items():
-            if len(k) == i:
-                tracker_subtree[k] = [v2, tracker_index[i - 1][k[:-1]], None]
-        if tracker_subtree:
-            tracker_index[i] = tracker_subtree
+def parse_xml_file(xml_file, tracker_index, xpath_list):
 
     current_xpath = []
     current_level = 0
@@ -118,12 +109,12 @@ def parse_xml_file(xml_file, action_index, xpath_list):
             except KeyError:
                 continue
 
-            if element_type in [ElementTypeEnum.DICT, ElementTypeEnum.LIST]:
+            if element_type[0] in [ElementTypeEnum.DICT, ElementTypeEnum.LIST]:
                 attributes = {}
                 for k, v in elem.attrib.items():
                     k = etree.QName(k).localname
                     try:
-                        attr_type = action_index[current_level][tuple(current_xpath + [k])]
+                        attr_type = tracker_index[current_level][tuple(current_xpath + [k])][0][1]
                         attr_data = element_decode(v, attr_type)
                         attributes[elem.tag + "@" + k] = attr_data
                     except KeyError:
@@ -143,20 +134,20 @@ def parse_xml_file(xml_file, action_index, xpath_list):
                 del current_xpath[-1]
                 continue
 
-            if element_type in [ElementTypeEnum.DICT, ElementTypeEnum.LIST]:
+            if element_type[0] in [ElementTypeEnum.DICT, ElementTypeEnum.LIST]:
                 data = obj
             else:
-                data = element_decode(elem.text, element_type)
+                data = element_decode(elem.text, element_type[0])
 
             # flush data to parent
             if data:
                 if parent[TrackerTypeEnum.OBJ] is None:
                     parent[TrackerTypeEnum.OBJ] = {}
 
-                if element_type == ElementTypeEnum.DICT:
+                if element_type[0] == ElementTypeEnum.DICT:
                     parent[TrackerTypeEnum.OBJ][elem.tag] = data.copy()
                     tracker_index[current_level][current_xpath_key][TrackerTypeEnum.OBJ] = None
-                elif element_type == ElementTypeEnum.LIST:
+                elif element_type[0] == ElementTypeEnum.LIST:
                     if elem.tag not in parent[TrackerTypeEnum.OBJ]:
                         parent[TrackerTypeEnum.OBJ][elem.tag] = []
                     parent[TrackerTypeEnum.OBJ][elem.tag].append(data.copy())
@@ -165,7 +156,7 @@ def parse_xml_file(xml_file, action_index, xpath_list):
                     parent[TrackerTypeEnum.OBJ].update({elem.tag: data})
 
             if current_xpath == xpath_list:
-                if element_type == ElementTypeEnum.DICT:
+                if element_type[0] == ElementTypeEnum.DICT:
                     yield data
                 else:
                     yield [data]
@@ -190,10 +181,10 @@ def open_zip_file(zip, filename):
         return open(filename, "wb")
 
 
-def xml_batcher(xml_file, action_index, xpath_list, rows_per_batch):
+def xml_batcher(xml_file, tracker_index, xpath_list, rows_per_batch):
     row_counter = 0
     results = []
-    for xml_dict in parse_xml_file(xml_file, action_index, xpath_list):
+    for xml_dict in parse_xml_file(xml_file, tracker_index, xpath_list):
         results.append(xml_dict)
         row_counter += 1
 
@@ -210,7 +201,7 @@ def write_json(
     output_file,
     zip,
     input_file,
-    action_index,
+    tracker_index,
     xpath_list,
     schema_type,
     processed,
@@ -225,7 +216,7 @@ def write_json(
         :return: data found and processed
         """
 
-        for xml_batch in xml_batcher(xml_file, action_index, xpath_list, rows_per_batch):
+        for xml_batch in xml_batcher(xml_file, tracker_index, xpath_list, rows_per_batch):
 
             arrow_obj = pa.array(xml_batch).cast(schema_type)
 
@@ -286,7 +277,7 @@ def write_json(
 def write_parquet(
     output_file,
     input_file,
-    action_index,
+    tracker_index,
     xpath_list,
     schema_type,
     processed,
@@ -301,7 +292,7 @@ def write_parquet(
         :return: data found and processed
         """
 
-        for xml_batch in xml_batcher(xml_file, action_index, xpath_list, rows_per_batch):
+        for xml_batch in xml_batcher(xml_file, tracker_index, xpath_list, rows_per_batch):
 
             arrow_obj = pa.array(xml_batch).cast(schema_type)
 
@@ -411,6 +402,17 @@ def parse_file(
             if new_items:
                 new_action_index[i] = new_items
 
+    tracker_index = {0:{():[(ElementTypeEnum.DICT, schema_type, False), None, None]}}
+    for i, v in new_action_index.items():
+        tracker_subtree = {}
+        for k, v2 in v.items():
+            if len(k) == i:
+                tracker_subtree[k] = [v2, tracker_index[i - 1][k[:-1]], None]
+            else:
+                tracker_subtree[k] = [v2, tracker_index[i - 1][k[:-2]], None]
+        if tracker_subtree:
+            tracker_index[i] = tracker_subtree
+
     _logger.info("Parsing " +  input_file)
     _logger.info("Writing to file " + output_file)
 
@@ -419,7 +421,7 @@ def parse_file(
             output_file,
             zip,
             input_file,
-            new_action_index,
+            tracker_index,
             xpath_list,
             schema_type,
             processed,
@@ -431,7 +433,7 @@ def parse_file(
         processed = write_parquet(
             output_file,
             input_file,
-            new_action_index,
+            tracker_index,
             xpath_list,
             schema_type,
             processed,

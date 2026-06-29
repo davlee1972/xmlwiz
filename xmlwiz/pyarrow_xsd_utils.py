@@ -64,11 +64,15 @@ def convert_xsd_type(elem, action_index, xpath, elem_type_list):
 
     if elem.type.is_simple():
         decode, pyarrow_type = map_xsd_type_to_arrow(elem.type)
-        action_index[level][xpath_key] = decode
+        action_index[level][xpath_key] = (decode, pyarrow_type, nullable)
         return pyarrow_type, nullable
     else:
         # Handle complex types (structs)
         fields = []
+
+        # prevents recursion using a depth of 2
+        if elem_type_list.count(elem.type.name) >= 2:
+            return None, None
 
         # 1. Process Attributes
         # Access the attribute group associated with the complex type
@@ -81,16 +85,13 @@ def convert_xsd_type(elem, action_index, xpath, elem_type_list):
                     attr_nullable = nullable
                 else:
                     attr_nullable = attr.use != "required"
-                action_index[level][attr_xpath_key] = decode
+                action_index[level][attr_xpath_key] = (decode, pyarrow_type, attr_nullable)
                 fields.append(pa.field(elem.local_name + "@" + attr.name, pyarrow_type, nullable=attr_nullable))
 
         # 2. Process Child Elements
         if hasattr(elem.type, "content") and hasattr(
             elem.type.content, "iter_elements"
         ):
-            # prevents recursion using a depth of 2
-            if elem_type_list.count(elem.type.name) >= 2:
-                return None, None
 
             if elem.type.name:
                 elem_type_list.append(elem.type.name)
@@ -103,10 +104,10 @@ def convert_xsd_type(elem, action_index, xpath, elem_type_list):
             return None, None
 
         if elem.max_occurs is None or elem.max_occurs > 1:
-            action_index[level][xpath_key] = ElementTypeEnum.LIST
+            action_index[level][xpath_key] = (ElementTypeEnum.LIST, pa.list_(pa.struct(fields)), nullable)
             return pa.list_(pa.struct(fields)), nullable
 
-        action_index[level][xpath_key] = ElementTypeEnum.DICT
+        action_index[level][xpath_key] = (ElementTypeEnum.DICT, pa.struct(fields), nullable)
         return pa.struct(fields), nullable
 
 
