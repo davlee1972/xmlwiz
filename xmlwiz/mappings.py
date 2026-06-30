@@ -30,10 +30,12 @@ class ElementTypeEnum(IntEnum):
     DICT = 1
     LIST = 2
     STRING = 3
-    DURATION = 4
-    TIMESTAMP = 5
-    TIME = 6
-    GEGORIAN = 7
+    DECIMAL = 4
+    DURATION = 5
+    DATE = 6
+    TIMESTAMP = 7
+    TIME = 8
+    GEGORIAN = 9
 
 gegorianPeriod = pa.struct([
     pa.field('yyyy', pa.int16(), nullable=True),
@@ -92,6 +94,8 @@ XSD_TO_PYARROW = {
 }
 
 XSD_TO_ELEMENT_DECODE = {
+    "decimal": ElementTypeEnum.DECIMAL,
+    "date": ElementTypeEnum.DATE,
     "time": ElementTypeEnum.TIME,
     "dateTime": ElementTypeEnum.TIMESTAMP,
     "duration": ElementTypeEnum.DURATION,

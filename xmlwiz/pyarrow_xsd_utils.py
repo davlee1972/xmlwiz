@@ -23,6 +23,7 @@
 
 from datetime import datetime
 import isodate
+from decimal import Decimal
 import pyarrow as pa
 
 from xmlwiz.mappings import ElementTypeEnum, XSD_TO_PYARROW, XSD_TO_ELEMENT_DECODE
@@ -142,10 +143,14 @@ def element_decode(elem_text, element_type):
         elem_list = elem_text.split(" ")
         elem_list = [element_decode(elem_item, element_type[1]) for elem_item in elem_list]
         return elem_list
+    elif element_type == ElementTypeEnum.DECIMAL:
+        return Decimal(elem_text)
     elif element_type == ElementTypeEnum.DURATION:
         dur = isodate.parse_duration(elem_text)
         microseconds = int(dur.total_seconds() * 1_000_000)
         return microseconds
+    elif element_type == ElementTypeEnum.DATE:
+        return datetime.fromisoformat(elem_text).date()
     elif element_type == ElementTypeEnum.TIMESTAMP:
         return datetime.fromisoformat(elem_text)
     elif element_type == ElementTypeEnum.TIME:

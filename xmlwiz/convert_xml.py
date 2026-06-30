@@ -35,7 +35,6 @@ import isodate
 
 import json
 import glob
-from functools import reduce
 
 import gzip
 import tarfile
@@ -43,6 +42,7 @@ from zipfile import ZipFile
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from pyarrow.lib import ArrowTypeError
 
 import xmlschema
 from lxml import etree
@@ -114,7 +114,7 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
                 for k, v in elem.attrib.items():
                     k = etree.QName(k).localname
                     try:
-                        attr_type = tracker_index[current_level][tuple(current_xpath + [k])][0][1]
+                        attr_type = tracker_index[current_level][tuple(current_xpath + [k])][0][0]
                         attr_data = element_decode(v, attr_type)
                         attributes[elem.tag + "@" + k] = attr_data
                     except KeyError:
