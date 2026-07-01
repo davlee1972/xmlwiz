@@ -47,8 +47,9 @@ from pyarrow.lib import ArrowTypeError
 import xmlschema
 from lxml import etree
 
-from xmlwiz.mappings import ElementTypeEnum
-from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_pyarrow, element_decode
+from xmlwiz.mappings import ElementTypeEnum, XpathTypeEnum
+
+from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_xpath_index, element_decode_type
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -77,14 +78,7 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-class TrackerTypeEnum(IntEnum):
-    ELEMENT_TYPE = 0
-    PARENT = 1
-    OBJ = 2
-
-
 def parse_xml_file(xml_file, tracker_index, xpath_list):
-
     current_xpath = []
     current_level = 0
 
@@ -98,6 +92,7 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
 
     for event, elem in context:
         elem.tag = etree.QName(elem.tag).localname
+        print(elem.tag)
 
         if event == "start":
             current_xpath.append(elem.tag)
@@ -105,7 +100,9 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
 
             current_xpath_key = tuple(current_xpath)
             try:
-                [element_type, parent, obj] = tracker_index[current_level][tuple(current_xpath_key)]
+                [element_type, parent, obj] = tracker_index[current_level][
+                    tuple(current_xpath_key)
+                ]
             except KeyError:
                 continue
 
@@ -114,22 +111,44 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
                 for k, v in elem.attrib.items():
                     k = etree.QName(k).localname
                     try:
-                        attr_type = tracker_index[current_level][tuple(current_xpath + [k])][0][0]
+                        attr_type = tracker_index[current_level][
+                            tuple(current_xpath + [k])
+                        ][0][0]
                         attr_data = element_decode(v, attr_type)
-                        attributes[elem.tag + "@" + k] = attr_data
+                        attributes[k] = attr_data
                     except KeyError:
                         pass
                 if attributes:
-                    if obj is None:
-                        tracker_index[current_level][tuple(current_xpath_key)][TrackerTypeEnum.OBJ] = {}
-                    tracker_index[current_level][tuple(current_xpath_key)][TrackerTypeEnum.OBJ].update(attributes)
+                    print(":==================")
+                    try:
+                        tracker_index[current_level][
+                            tuple(current_xpath + ["@attributes"])
+                        ][XpathTypeEnum.OBJ] = attributes
+                        print(":==================")
+                        if parent[XpathTypeEnum.OBJ] is None:
+                            parent[XpathTypeEnum.OBJ] = {}
+                        parent[XpathTypeEnum.OBJ]["@attributes"] = attributes
+                        print(":==================")
+                    except KeyError:
+                        if obj is None:
+                            tracker_index[current_level][current_xpath_key][
+                                XpathTypeEnum.OBJ
+                            ] = {}
+                        attributes = {
+                            elem.tag + "@" + k: v for k, v in attributes.items()
+                        }
+                        tracker_index[current_level][current_xpath_key][
+                            XpathTypeEnum.OBJ
+                        ].update(attributes)
 
         elif event == "end":
             current_xpath_key = tuple(current_xpath)
             try:
-                [element_type, parent, obj] = tracker_index[current_level][current_xpath_key]
+                [element_type, parent, obj] = tracker_index[current_level][
+                    current_xpath_key
+                ]
             except KeyError:
-                elem.clear()            
+                elem.clear()
                 current_level -= 1
                 del current_xpath[-1]
                 continue
@@ -141,19 +160,23 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
 
             # flush data to parent
             if data:
-                if parent[TrackerTypeEnum.OBJ] is None:
-                    parent[TrackerTypeEnum.OBJ] = {}
+                if parent[XpathTypeEnum.OBJ] is None:
+                    parent[XpathTypeEnum.OBJ] = {}
 
                 if element_type[0] == ElementTypeEnum.DICT:
-                    parent[TrackerTypeEnum.OBJ][elem.tag] = data.copy()
-                    tracker_index[current_level][current_xpath_key][TrackerTypeEnum.OBJ] = None
+                    parent[XpathTypeEnum.OBJ][elem.tag] = data.copy()
+                    tracker_index[current_level][current_xpath_key][
+                        XpathTypeEnum.OBJ
+                    ] = None
                 elif element_type[0] == ElementTypeEnum.LIST:
-                    if elem.tag not in parent[TrackerTypeEnum.OBJ]:
-                        parent[TrackerTypeEnum.OBJ][elem.tag] = []
-                    parent[TrackerTypeEnum.OBJ][elem.tag].append(data.copy())
-                    tracker_index[current_level][current_xpath_key][TrackerTypeEnum.OBJ] = None
+                    if elem.tag not in parent[XpathTypeEnum.OBJ]:
+                        parent[XpathTypeEnum.OBJ][elem.tag] = []
+                    parent[XpathTypeEnum.OBJ][elem.tag].append(data.copy())
+                    tracker_index[current_level][current_xpath_key][
+                        XpathTypeEnum.OBJ
+                    ] = None
                 else:
-                    parent[TrackerTypeEnum.OBJ].update({elem.tag: data})
+                    parent[XpathTypeEnum.OBJ].update({elem.tag: data})
 
             if current_xpath == xpath_list:
                 if element_type[0] == ElementTypeEnum.DICT:
@@ -161,12 +184,12 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
                 else:
                     yield [data]
 
-            elem.clear()            
+            elem.clear()
             current_level -= 1
             del current_xpath[-1]
 
     if not xpath_list:
-        yield tracker_index[0][()][TrackerTypeEnum.OBJ]
+        yield tracker_index[0][()][XpathTypeEnum.OBJ]
 
 
 def open_zip_file(zip, filename):
@@ -216,7 +239,10 @@ def write_json(
         :return: data found and processed
         """
 
-        for xml_batch in xml_batcher(xml_file, tracker_index, xpath_list, rows_per_batch):
+        for xml_batch in xml_batcher(
+            xml_file, tracker_index, xpath_list, rows_per_batch
+        ):
+            print(xml_batch)
 
             arrow_obj = pa.array(xml_batch).cast(schema_type)
 
@@ -292,8 +318,9 @@ def write_parquet(
         :return: data found and processed
         """
 
-        for xml_batch in xml_batcher(xml_file, tracker_index, xpath_list, rows_per_batch):
-
+        for xml_batch in xml_batcher(
+            xml_file, tracker_index, xpath_list, rows_per_batch
+        ):
             arrow_obj = pa.array(xml_batch).cast(schema_type)
 
             if pa.types.is_struct(arrow_obj.type):
@@ -301,7 +328,7 @@ def write_parquet(
             else:
                 arrow_obj = arrow_obj.flatten()
                 table = pa.Table.from_struct_array(arrow_obj)
-          
+
             if table.num_rows > 0:
                 writer.write_table(table)
                 processed = True
@@ -344,6 +371,9 @@ def parse_file(
     input_file,
     output_file,
     xsd_file,
+    flat_attributes,
+    flat_lists,
+    max_recursion,
     output_format,
     zip,
     xpath,
@@ -365,7 +395,13 @@ def parse_file(
     processed = False
 
     xml_schema = xmlschema.XMLSchema11(xsd_file)
-    pyarrow_schema, action_index = convert_xsd_to_pyarrow(xml_schema, [])
+    pyarrow_schema, action_index = convert_xsd_to_pyarrow(
+        xml_schema,
+        xpath=[],
+        flat_attributes=flat_attributes,
+        flat_lists=flat_lists,
+        max_recursion=max_recursion,
+    )
 
     schema_type = pa.struct(pyarrow_schema)
 
@@ -392,17 +428,17 @@ def parse_file(
             new_items = {}
             for k, v2 in v.items():
                 if i <= len(xpath_list):
-                    if k == tuple(xpath_list[:len(k)]):
+                    if k == tuple(xpath_list[: len(k)]):
                         new_items[k] = v2
                     elif k[:i] == tuple(xpath_list[:i]) and len(k) > i:
                         new_items[k] = v2
-                elif k[:len(xpath_list)] == tuple(xpath_list):
+                elif k[: len(xpath_list)] == tuple(xpath_list):
                     new_items[k] = v2
 
             if new_items:
                 new_action_index[i] = new_items
 
-    tracker_index = {0:{():[(ElementTypeEnum.DICT, schema_type, False), None, None]}}
+    tracker_index = {0: {(): [(ElementTypeEnum.DICT, schema_type, False), None, None]}}
     for i, v in new_action_index.items():
         tracker_subtree = {}
         for k, v2 in v.items():
@@ -413,7 +449,7 @@ def parse_file(
         if tracker_subtree:
             tracker_index[i] = tracker_subtree
 
-    _logger.info("Parsing " +  input_file)
+    _logger.info("Parsing " + input_file)
     _logger.info("Writing to file " + output_file)
 
     if output_format in ["json", "jsonl"]:
@@ -455,6 +491,9 @@ def parse_file(
 def convert_xml(
     xsd_file=None,
     output_format="jsonl",
+    flat_attributes=True,
+    flat_lists=True,
+    max_recursion=2,
     rows_per_batch=None,
     target_path=None,
     zip=False,
@@ -568,6 +607,9 @@ def convert_xml(
                     filename,
                     output_file,
                     xsd_file,
+                    flat_attributes,
+                    flat_lists,
+                    max_recursion,
                     output_format,
                     zip,
                     xpath,
@@ -582,6 +624,9 @@ def convert_xml(
                 filename,
                 output_file,
                 xsd_file,
+                flat_attributes,
+                flat_lists,
+                max_recursion,
                 output_format,
                 zip,
                 xpath,

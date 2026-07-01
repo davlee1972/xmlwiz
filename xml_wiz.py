@@ -24,6 +24,24 @@ if __name__ == "__main__":
         type=int,
         help="number of rows to write per batch.",
     )
+    parser.add_argument(
+        "--flat_attributes",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Flatten xml attributes.",
+    )
+    parser.add_argument(
+        "--flat_lists",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Flatten simple lists.",
+    )
+    parser.add_argument(
+        "--max_recursion",
+        default=2,
+        type=int,
+        help="Max recursions for self referencing elements.",
+    )
     parser.add_argument("-z", "--zip", action="store_true", help="gzip output file")
     parser.add_argument("-p", "--xpath", help="xpath to parse out.")
     parser.add_argument(
@@ -57,6 +75,9 @@ if __name__ == "__main__":
     convert_xml(
         args.xsd_file,
         args.output_format,
+        args.flat_attributes,
+        args.flat_lists,
+        args.max_recursion,
         args.rows_per_batch,
         args.target_path,
         args.zip,
