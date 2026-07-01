@@ -188,6 +188,8 @@ def pyarrow_numeric(xsd_type):
                 return pa.decimal128(totalDigits, 0)
             elif totalDigits <= 76:
                 return pa.decimal256(totalDigits, 0)
+        else:
+            return pa.uint64()
     else:
         return pa.int64()
 
@@ -205,8 +207,8 @@ def map_xsd_type_to_arrow(xsd_type):
         base_type = xsd_type
 
     if base_type.is_list():
-        local_name = base_type.item_item.local_name
-        element_type = XSD_TO_ELEMENT_DECODE.get(local_name, ElementTypeEnum.STRING)
+        local_name = base_type.item_type.local_name
+        element_type = XSD_TO_ELEMENT_DECODE.get(local_name, ElementTypeEnum.OTHER)
         pyarrow_type = XSD_TO_PYARROW.get(local_name, pa.string())
         if pyarrow_type == "numeric":
             pyarrow_type = pyarrow_numeric(xsd_type)
@@ -253,9 +255,6 @@ def convert_xsd_elem(elem, xpath_index, xpath, max_recursion, recursion_check_li
             [None, None, None, None],
         )
     else:
-        # prevents recursion. default is 2 Levels.
-        if recursion_check_list.count(elem.type.name) >= max_recursion:
-            return
 
         # 1. Process Attributes
         # Access the attribute group associated with the complex type
@@ -371,11 +370,18 @@ def convert_xsd_elem(elem, xpath_index, xpath, max_recursion, recursion_check_li
                     [None, None, None, None],
                 )
 
-            if elem.type.name:
-                # add element type name to recursion counter in case child elements contain this element type
-                recursion_check_list.append(elem.type.name)
-
+            child_counter = 0
             for child_elem in elem.type.content.iter_elements():
+
+                if child_elem.type.name:
+                    # add element type name to recursion counter in case child elements come up more than twice (by default).
+                    recursion_check_list.append(child_elem.type.name)
+
+                    if recursion_check_list.count(child_elem.type.name) > max_recursion:
+                        continue
+
+                child_counter +=1
+
                 convert_xsd_elem(
                     child_elem,
                     xpath_index,
@@ -383,6 +389,10 @@ def convert_xsd_elem(elem, xpath_index, xpath, max_recursion, recursion_check_li
                     max_recursion,
                     recursion_check_list,
                 )
+
+            if elem.type.has_complex_content() and child_counter == 0:
+                # remove complex content if it has no child elements due to max recursion limit.
+                del xpath_index[level][xpath_key]
 
 
 def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
@@ -416,6 +426,7 @@ def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
     # Each xml file should only have one root element
     # However, we may have to merge different root elements across files.
     # Make all root elements nullable to enable root schema merging.
+
     if len(xpath_index[1]) > 1:
         for key, xpath_type in xpath_index[1].items():
             xpath_type = list(xpath_type)
@@ -453,7 +464,8 @@ def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
     return xpath_index
 
 
-def convert_xpath_index_to_pyarrow_schema(xpath_index):
+def convert_xpath_index_to_pyarrow_schema(xpath_index, xpath_list=None):
+    
     # convert xpath index to pyarrow schema
     for level in reversed(list(xpath_index.keys())):
         for child, child_type in xpath_index[level].items():
@@ -469,6 +481,7 @@ def convert_xpath_index_to_pyarrow_schema(xpath_index):
                 ElementTypeEnum.DICT,
                 ElementTypeEnum.LIST_OF_DICT,
             ]:
+
                 struct_type = pa.struct(
                     [
                         pa.field(
@@ -496,4 +509,8 @@ def convert_xpath_index_to_pyarrow_schema(xpath_index):
                     XpathValueEnum.FIELD_TYPE
                 ] = child_type[XpathTypeEnum.PYARROW_TYPE]
 
-    return xpath_index[0][()][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE]
+    if xpath_list:
+        level = len(xpath_list)
+        return xpath_index[level][tuple(xpath_list)][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE]
+    else:
+        return xpath_index[0][()][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE]
