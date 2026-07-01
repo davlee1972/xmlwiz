@@ -461,18 +461,39 @@ def convert_xpath_index_to_pyarrow_schema(xpath_index):
                 isinstance(child_type[XpathTypeEnum.ELEMENT_TYPE], tuple)
                 and child_type[XpathTypeEnum.ELEMENT_TYPE][0] == ElementTypeEnum.LIST
             ):
-                xpath_index[level][child][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE] = pa.list_(child_type[XpathTypeEnum.PYARROW_TYPE])
-            
-            elif child_type[XpathTypeEnum.ELEMENT_TYPE] in [ElementTypeEnum.DICT, ElementTypeEnum.LIST_OF_DICT]:
+                xpath_index[level][child][XpathTypeEnum.VALUE][
+                    XpathValueEnum.FIELD_TYPE
+                ] = pa.list_(child_type[XpathTypeEnum.PYARROW_TYPE])
 
-                struct_type = pa.struct([pa.field(subchild[XpathTypeEnum.NAME], subchild[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE], nullable=subchild[XpathTypeEnum.NULLABLE])
-                for subchild in child_type[XpathTypeEnum.CHILDREN]])
+            elif child_type[XpathTypeEnum.ELEMENT_TYPE] in [
+                ElementTypeEnum.DICT,
+                ElementTypeEnum.LIST_OF_DICT,
+            ]:
+                struct_type = pa.struct(
+                    [
+                        pa.field(
+                            subchild[XpathTypeEnum.NAME],
+                            subchild[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE],
+                            nullable=subchild[XpathTypeEnum.NULLABLE],
+                        )
+                        for subchild in child_type[XpathTypeEnum.CHILDREN]
+                    ]
+                )
 
                 if child_type[XpathTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.DICT:
-                    xpath_index[level][child][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE] = struct_type
-                elif child_type[XpathTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.LIST_OF_DICT:
-                    xpath_index[level][child][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE] = pa.list_(struct_type)
+                    xpath_index[level][child][XpathTypeEnum.VALUE][
+                        XpathValueEnum.FIELD_TYPE
+                    ] = struct_type
+                elif (
+                    child_type[XpathTypeEnum.ELEMENT_TYPE]
+                    == ElementTypeEnum.LIST_OF_DICT
+                ):
+                    xpath_index[level][child][XpathTypeEnum.VALUE][
+                        XpathValueEnum.FIELD_TYPE
+                    ] = pa.list_(struct_type)
             else:
-                xpath_index[level][child][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE] = child_type[XpathTypeEnum.PYARROW_TYPE]
-    
+                xpath_index[level][child][XpathTypeEnum.VALUE][
+                    XpathValueEnum.FIELD_TYPE
+                ] = child_type[XpathTypeEnum.PYARROW_TYPE]
+
     return xpath_index[0][()][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE]
