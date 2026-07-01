@@ -21,27 +21,56 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
 from enum import IntEnum
 import pyarrow as pa
 
 
+class XpathTypeEnum(IntEnum):  # stored as a non-mutable tuple in xpath index.
+    NAME = 0
+    ELEMENT_TYPE = 1  # element type from list below.
+    PYARROW_TYPE = 2  # pyarrow type to cast from xml string or python type.
+    NULLABLE = 3  # whether the type is nullable.
+    PARENT = 4  # tracks parent xpath index.
+    CHILDREN = 5  # tracks child xpath indexes used to set offsets or clear values.
+    CASTING_RULES = (
+        6  # pyarrow compute expression for xsd:restrictions transformations.
+    )
+    VALIDATION_RULES = 7  # pyarrow compute expression for xsd:restrictions checks.
+    VALUE = 8  # list for rowcount, offset and vector values
+
+
+class XpathValueEnum(IntEnum):  # stored as a mutable list in xpath index
+    ROWCOUNT = 0  # current rowcount for LIST or LIST_OF_DICT.
+    OFFSETS = 1  # offsets vector buffer. set by parent LIST types.
+    VECTOR = 2  # value vector buffer. element text goes in here.
+    FIELD_TYPE = 3  # pyarrow field adjusted for lists or structs without null columns.
+
+
 class ElementTypeEnum(IntEnum):
-    DICT = 1
-    LIST = 2
-    STRING = 3
+    LIST = 1
+    # Only used when flattening content with no attributes and a single element.
+    # with max_occurs > 0.
+    DICT = 2
+    # content without max_occurs > 0.
+    # or flattened content with no attributes and a single element.
+    LIST_OF_DICT = 3
+    # content with max_occurs > 0.
     DECIMAL = 4
     DURATION = 5
     DATE = 6
     TIMESTAMP = 7
     TIME = 8
     GEGORIAN = 9
+    OTHER = 10
 
-gegorianPeriod = pa.struct([
-    pa.field('yyyy', pa.int16(), nullable=True),
-    pa.field('mm', pa.int8(), nullable=True),
-    pa.field('dd', pa.int8(), nullable=True)
-])
+
+gegorianPeriod = pa.struct(
+    [
+        pa.field("yyyy", pa.int16(), nullable=True),
+        pa.field("mm", pa.int8(), nullable=True),
+        pa.field("dd", pa.int8(), nullable=True),
+    ]
+)
 
 # Core mapping dictionary
 XSD_TO_PYARROW = {
@@ -57,14 +86,14 @@ XSD_TO_PYARROW = {
     "unsignedInt": pa.uint32(),
     "unsignedLong": pa.uint64(),
     # Special Constrained Integers (Mapped to standard physical types)
-    "positiveInteger": pa.uint64(),  # Constraint: >= 1
-    "nonNegativeInteger": pa.uint64(),  # Constraint: >= 0
-    "negativeInteger": pa.int64(),  # Constraint: <= -1
-    "nonPositiveInteger": pa.int64(),  # Constraint: <= 0
+    "positiveInteger": "numeric",  # Constraint: >= 1
+    "nonNegativeInteger": "numeric",  # Constraint: >= 0
+    "negativeInteger": "numeric",  # Constraint: <= -1
+    "nonPositiveInteger": "numeric",  # Constraint: <= 0
     # Floats & Decimals
     "float": pa.float32(),
     "double": pa.float64(),
-    "decimal": pa.decimal128(38, 10),  # Defaulting to a standard precision/scale
+    "decimal": "numeric",  # Defaults to (38,10)
     # Strings & Identifiers
     "string": pa.string(),
     "normalizedString": pa.string(),
@@ -93,6 +122,8 @@ XSD_TO_PYARROW = {
     "gMonth": gegorianPeriod,
 }
 
+# used to convert element text to python types
+# this is needed if pyarrow cannot cast string values directly to pyarrow types
 XSD_TO_ELEMENT_DECODE = {
     "decimal": ElementTypeEnum.DECIMAL,
     "date": ElementTypeEnum.DATE,
@@ -105,5 +136,3 @@ XSD_TO_ELEMENT_DECODE = {
     "gDay": ElementTypeEnum.GEGORIAN,
     "gMonth": ElementTypeEnum.GEGORIAN,
 }
-
-
