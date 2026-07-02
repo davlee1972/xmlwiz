@@ -40,10 +40,15 @@ class XpathTypeEnum(IntEnum):  # stored as a non-mutable tuple in xpath index.
 
 
 class XpathValueEnum(IntEnum):  # stored as a mutable list in xpath index
+    # The values below are used to capture xml data
     ROWCOUNT = 0  # current rowcount for LIST or LIST_OF_DICT.
     OFFSETS = 1  # offsets vector buffer. set by parent LIST types.
     VECTOR = 2  # value vector buffer. element text goes in here.
-    FIELD_TYPE = 3  # pyarrow field adjusted for lists or structs without null columns.
+    # The values below are used for formatting results
+    FIELD_NAME = 3  # adjusted field name
+    FIELD_TYPE = 4  # adjusted pyarrow type
+    PARENT_FIELD = 5  # adjusted parent field
+    CHILD_FIELDS = 6  # adjusted child fields
 
 
 class ElementTypeEnum(IntEnum):
