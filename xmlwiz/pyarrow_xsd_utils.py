@@ -426,6 +426,7 @@ def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
     # Each xml file should only have one root element
     # However, we may have to merge different root elements across files.
     # Make all root elements nullable to enable root schema merging.
+
     if len(xpath_index[1]) > 1:
         for key, xpath_type in xpath_index[1].items():
             xpath_type = list(xpath_type)
