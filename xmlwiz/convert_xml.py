@@ -27,11 +27,9 @@ import sys
 import subprocess
 from multiprocessing import Pool
 import logging
-from enum import IntEnum
 
 from datetime import datetime, date, time, timedelta
 import decimal
-import isodate
 
 import json
 import glob
@@ -47,9 +45,9 @@ from pyarrow.lib import ArrowTypeError
 import xmlschema
 from lxml import etree
 
-from xmlwiz.mappings import ElementTypeEnum, XpathTypeEnum
+from xmlwiz.mappings import ElementType, xpathType, xpathValue
 
-from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_xpath_index, element_decode_type
+from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_xpath_index, convert_xpath_index_to_pyarrow_schema, element_decode_type
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -78,9 +76,10 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml_file(xml_file, tracker_index, xpath_list):
+def parse_xml(xml_file, parser_index, xpath_list):
     current_xpath = []
     current_level = 0
+    elem_tracker = parser_index[0][()]
 
     context = etree.iterparse(
         xml_file,
@@ -100,18 +99,18 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
 
             current_xpath_key = tuple(current_xpath)
             try:
-                [element_type, parent, obj] = tracker_index[current_level][
+                [element_type, parent, obj] = parser_index[current_level][
                     tuple(current_xpath_key)
                 ]
             except KeyError:
                 continue
 
-            if element_type[0] in [ElementTypeEnum.DICT, ElementTypeEnum.LIST]:
+            if element_type[0] in [ElementType.DICT, ElementType.LIST]:
                 attributes = {}
                 for k, v in elem.attrib.items():
                     k = etree.QName(k).localname
                     try:
-                        attr_type = tracker_index[current_level][
+                        attr_type = parser_index[current_level][
                             tuple(current_xpath + [k])
                         ][0][0]
                         attr_data = element_decode(v, attr_type)
@@ -121,30 +120,30 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
                 if attributes:
                     print(":==================")
                     try:
-                        tracker_index[current_level][
+                        parser_index[current_level][
                             tuple(current_xpath + ["@attributes"])
-                        ][XpathTypeEnum.OBJ] = attributes
+                        ][xpathType.OBJ] = attributes
                         print(":==================")
-                        if parent[XpathTypeEnum.OBJ] is None:
-                            parent[XpathTypeEnum.OBJ] = {}
-                        parent[XpathTypeEnum.OBJ]["@attributes"] = attributes
+                        if parent[xpathType.OBJ] is None:
+                            parent[xpathType.OBJ] = {}
+                        parent[xpathType.OBJ]["@attributes"] = attributes
                         print(":==================")
                     except KeyError:
                         if obj is None:
-                            tracker_index[current_level][current_xpath_key][
-                                XpathTypeEnum.OBJ
+                            parser_index[current_level][current_xpath_key][
+                                xpathType.OBJ
                             ] = {}
                         attributes = {
                             elem.tag + "@" + k: v for k, v in attributes.items()
                         }
-                        tracker_index[current_level][current_xpath_key][
-                            XpathTypeEnum.OBJ
+                        parser_index[current_level][current_xpath_key][
+                            xpathType.OBJ
                         ].update(attributes)
 
         elif event == "end":
             current_xpath_key = tuple(current_xpath)
             try:
-                [element_type, parent, obj] = tracker_index[current_level][
+                [element_type, parent, obj] = parser_index[current_level][
                     current_xpath_key
                 ]
             except KeyError:
@@ -153,33 +152,33 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
                 del current_xpath[-1]
                 continue
 
-            if element_type[0] in [ElementTypeEnum.DICT, ElementTypeEnum.LIST]:
+            if element_type[0] in [ElementType.DICT, ElementType.LIST]:
                 data = obj
             else:
                 data = element_decode(elem.text, element_type[0])
 
             # flush data to parent
             if data:
-                if parent[XpathTypeEnum.OBJ] is None:
-                    parent[XpathTypeEnum.OBJ] = {}
+                if parent[xpathType.OBJ] is None:
+                    parent[xpathType.OBJ] = {}
 
-                if element_type[0] == ElementTypeEnum.DICT:
-                    parent[XpathTypeEnum.OBJ][elem.tag] = data.copy()
-                    tracker_index[current_level][current_xpath_key][
-                        XpathTypeEnum.OBJ
+                if element_type[0] == ElementType.DICT:
+                    parent[xpathType.OBJ][elem.tag] = data.copy()
+                    parser_index[current_level][current_xpath_key][
+                        xpathType.OBJ
                     ] = None
-                elif element_type[0] == ElementTypeEnum.LIST:
-                    if elem.tag not in parent[XpathTypeEnum.OBJ]:
-                        parent[XpathTypeEnum.OBJ][elem.tag] = []
-                    parent[XpathTypeEnum.OBJ][elem.tag].append(data.copy())
-                    tracker_index[current_level][current_xpath_key][
-                        XpathTypeEnum.OBJ
+                elif element_type[0] == ElementType.LIST:
+                    if elem.tag not in parent[xpathType.OBJ]:
+                        parent[xpathType.OBJ][elem.tag] = []
+                    parent[xpathType.OBJ][elem.tag].append(data.copy())
+                    parser_index[current_level][current_xpath_key][
+                        xpathType.OBJ
                     ] = None
                 else:
-                    parent[XpathTypeEnum.OBJ].update({elem.tag: data})
+                    parent[xpathType.OBJ].update({elem.tag: data})
 
             if current_xpath == xpath_list:
-                if element_type[0] == ElementTypeEnum.DICT:
+                if element_type[0] == ElementType.DICT:
                     yield data
                 else:
                     yield [data]
@@ -189,25 +188,25 @@ def parse_xml_file(xml_file, tracker_index, xpath_list):
             del current_xpath[-1]
 
     if not xpath_list:
-        yield tracker_index[0][()][XpathTypeEnum.OBJ]
+        yield parser_index[0][()][xpathType.OBJ]
 
 
-def open_zip_file(zip, filename):
+def open_gzip_file(gzipfile, filename):
     """
-    :param zip: whether to open a new file using gzip
+    :param gzipfile: whether to open a new file using gzip
     :param filename: name of new file
     :return: file handlers
     """
-    if zip:
+    if gzipfile:
         return gzip.open(filename, "wb")
     else:
         return open(filename, "wb")
 
 
-def xml_batcher(xml_file, tracker_index, xpath_list, rows_per_batch):
+def xml_batcher(xml_file, parser_index, xpath_list, rows_per_batch):
     row_counter = 0
     results = []
-    for xml_dict in parse_xml_file(xml_file, tracker_index, xpath_list):
+    for xml_dict in parse_xml(xml_file, parser_index, xpath_list):
         results.append(xml_dict)
         row_counter += 1
 
@@ -222,9 +221,9 @@ def xml_batcher(xml_file, tracker_index, xpath_list, rows_per_batch):
 
 def write_json(
     output_file,
-    zip,
+    gzipfile,
     input_file,
-    tracker_index,
+    parser_index,
     xpath_list,
     schema_type,
     processed,
@@ -240,7 +239,7 @@ def write_json(
         """
 
         for xml_batch in xml_batcher(
-            xml_file, tracker_index, xpath_list, rows_per_batch
+            xml_file, parser_index, xpath_list, rows_per_batch
         ):
             print(xml_batch)
 
@@ -267,16 +266,16 @@ def write_json(
                             file_obj.write(bytes(os.linesep + xml_json, "utf-8"))
         return processed
 
-    with open_zip_file(zip, output_file) as file_obj:
+    with open_gzip_file(gzipfile, output_file) as file_obj:
         if output_format == "json":
             file_obj.write(bytes("[" + os.linesep, "utf-8"))
 
         if input_file.endswith(".tar.gz"):
-            zip_file = tarfile.open(input_file, "r")
-            zip_file_list = zip_file.getmembers()
+            tar_file = tarfile.open(input_file, "r")
+            tar_file_list = tar_file.getmembers()
 
-            for member in zip_file_list:
-                with zip_file.extractfile(member) as xml_file:
+            for member in tar_file_list:
+                with tar_file.extractfile(member) as xml_file:
                     processed = write_xml_to_json(xml_file, processed)
 
         elif input_file.endswith(".zip"):
@@ -303,7 +302,7 @@ def write_json(
 def write_parquet(
     output_file,
     input_file,
-    tracker_index,
+    parser_index,
     xpath_list,
     schema_type,
     processed,
@@ -319,7 +318,7 @@ def write_parquet(
         """
 
         for xml_batch in xml_batcher(
-            xml_file, tracker_index, xpath_list, rows_per_batch
+            xml_file, parser_index, xpath_list, rows_per_batch
         ):
             arrow_obj = pa.array(xml_batch).cast(schema_type)
 
@@ -342,11 +341,11 @@ def write_parquet(
 
     with pq.ParquetWriter(output_file, pyarrow_schema) as writer:
         if input_file.endswith(".tar.gz"):
-            zip_file = tarfile.open(input_file, "r")
-            zip_file_list = zip_file.getmembers()
+            gzip_file = tarfile.open(input_file, "r")
+            gzip_file_list = gzip_file.getmembers()
 
-            for member in zip_file_list:
-                with zip_file.extractfile(member) as xml_file:
+            for member in gzip_file_list:
+                with gzip_file.extractfile(member) as xml_file:
                     processed = write_xml_to_parquet(xml_file, processed)
 
         elif input_file.endswith(".zip"):
@@ -367,99 +366,83 @@ def write_parquet(
         return processed
 
 
-def parse_file(
-    input_file,
-    output_file,
+def parse_xml_file(
     xsd_file,
-    flat_attributes,
-    flat_lists,
-    max_recursion,
-    output_format,
-    zip,
-    xpath,
-    rows_per_batch,
-    target_path=None,
+    xml_file,
+    xml_path,
+    output_file,
+    output_path,
+    max_recursion=2,
+    rows_per_batch=None,
+    output_format="jsonl",
+    gzipfile=False,
     delete_xml=False,
+    flat_attributes=False,
+    flat_elements=False,
 ):
     """
-    :param input_file: input file
-    :param output_file: output file
     :param xsd_file: xsd file
+    :param xml_file: xml input file
+    :param xml_path: whether to parse a specific xml path
     :param output_format: jsonl or json
-    :param zip: zip save file
-    :param xpath: whether to parse a specific xml path
-    :param target_path: directory to save file
+    :param output_file: output file
+    :param output_path: directory to save file
+    :param gzipfile: gzip saved file
     :param delete_xml: optional delete xml file after converting
     """
 
     processed = False
-
     xml_schema = xmlschema.XMLSchema11(xsd_file)
-    pyarrow_schema, action_index = convert_xsd_to_pyarrow(
-        xml_schema,
-        xpath=[],
-        flat_attributes=flat_attributes,
-        flat_lists=flat_lists,
-        max_recursion=max_recursion,
-    )
 
-    schema_type = pa.struct(pyarrow_schema)
+    xpath_index = convert_xsd_to_xpath_index(xml_schema, max_recursion)
 
     xpath_list = None
-
-    new_action_index = action_index
-
-    if xpath:
-        xpath_list = xpath.split("/")
+    if xml_path:
+        xpath_list = xml_path.split("/")
         xpath_list = xpath_list[1:]
 
-        current_type = pyarrow_schema
-        for column in xpath_list:
-            try:
-                current_field = current_type.field(column)
-            except:
-                current_field = current_type.value_type.field(column)
-            current_type = current_field.type
-        schema_type = current_type
+    pyarrow_schema = convert_xpath_index_to_pyarrow_schema(
+        xpath_index, xpath_list, flat_attributes, flat_elements
+    )
 
-        new_action_index = {}
+    parser_index = xpath_index.copy()
 
-        for i, v in action_index.items():
-            new_items = {}
-            for k, v2 in v.items():
-                if i <= len(xpath_list):
-                    if k == tuple(xpath_list[: len(k)]):
-                        new_items[k] = v2
-                    elif k[:i] == tuple(xpath_list[:i]) and len(k) > i:
-                        new_items[k] = v2
-                elif k[: len(xpath_list)] == tuple(xpath_list):
-                    new_items[k] = v2
+    if xpath_list:
+        parser_levels = len(parser_index)
+        level = 0
+        tracker = []
+        for xpath in xpath_list:
+            tracker.append(xpath)
+            tracker_key = tuple(tracker)
+            level += 1
+            del_list = []
+            for key in parser_index[level]:
+                if key != tracker_key:
+                    del_list.append(key)
+            if del_list:
+                for key in del_list:
+                    del parser_index[level][key]
 
-            if new_items:
-                new_action_index[i] = new_items
+        for i in range(level + 1, parser_levels):
+            del_list = []
+            for key in parser_index[i]:
+                if key[:len(xpath_list)] != tuple(xpath_list):
+                    del_list.append(key)
+            if del_list:
+                for key in del_list:
+                    del parser_index[i][key]
 
-    tracker_index = {0: {(): [(ElementTypeEnum.DICT, schema_type, False), None, None]}}
-    for i, v in new_action_index.items():
-        tracker_subtree = {}
-        for k, v2 in v.items():
-            if len(k) == i:
-                tracker_subtree[k] = [v2, tracker_index[i - 1][k[:-1]], None]
-            else:
-                tracker_subtree[k] = [v2, tracker_index[i - 1][k[:-2]], None]
-        if tracker_subtree:
-            tracker_index[i] = tracker_subtree
-
-    _logger.info("Parsing " + input_file)
+    _logger.info("Parsing " + xml_file)
     _logger.info("Writing to file " + output_file)
 
     if output_format in ["json", "jsonl"]:
         processed = write_json(
             output_file,
-            zip,
-            input_file,
-            tracker_index,
+            gzipfile,
+            xml_file,
+            parser_index,
             xpath_list,
-            schema_type,
+            pyarrow_schema,
             processed,
             output_format,
             rows_per_batch,
@@ -468,10 +451,10 @@ def parse_file(
     elif output_format in ["parquet"]:
         processed = write_parquet(
             output_file,
-            input_file,
-            tracker_index,
+            xml_file,
+            parser_index,
             xpath_list,
-            schema_type,
+            pyarrow_schema,
             processed,
             rows_per_batch,
         )
@@ -479,43 +462,45 @@ def parse_file(
     # Remove output file if no data is generated
     if not processed:
         os.remove(output_file)
-        _logger.info("No data found in " + input_file)
+        _logger.info("No data found in " + xml_file)
         return
 
     if delete_xml:
         os.remove(input_file)
 
-    _logger.info("Completed " + input_file)
+    _logger.info("Completed " + xml_file)
 
 
 def convert_xml(
     xsd_file=None,
-    output_format="jsonl",
-    flat_attributes=True,
-    flat_lists=True,
     max_recursion=2,
+    xml_path=None,
     rows_per_batch=None,
-    target_path=None,
-    zip=False,
-    xpath=None,
     multi=1,
+    output_format="jsonl",
+    output_path=None,
+    gzipfile=False,
     no_overwrite=False,
-    verbose="DEBUG",
-    log=None,
-    delete_xml=None,
+    delete_xml=False,
+    flatten=False,
+    log_level="INFO",
+    log_file=None,
     xml_files=None,
 ):
     """
     :param xsd_file: xsd file name
-    :param output_format: jsonl or json
-    :param target_path: directory to save file
-    :param zip: zip save file
-    :param xpath: whether to parse a specific xml path
+    :param max_recursions:
+    :param xml_path: whether to parse a specific xml path
+    :param rows_per_batch:
     :param multi: how many files to convert concurrently
+    :param output_format: jsonl or json
+    :param output_path: directory to save file
+    :param gzipfile: gzip saved file
     :param no_overwrite: overwrite target file
-    :param verbose: stdout log messaging level
-    :param log: optional log file
     :param delete_xml: optional delete xml file after converting
+    :param flatten:
+    :param log_level: stdout log messaging level
+    :param log_file: optional log file
     :param xml_files: list of xml_files
 
     """
@@ -527,23 +512,23 @@ def convert_xml(
     _logger.handlers.clear()
     ch = logging.StreamHandler()
     ch.setFormatter(formatter)
-    ch.setLevel(logging.getLevelName(verbose))
+    ch.setLevel(logging.getLevelName(log_level))
     _logger.addHandler(ch)
 
-    if log:
+    if log_file:
         # create log file handler and set level to debug
-        fh = logging.FileHandler(log)
+        fh = logging.FileHandler(log_file)
         fh.setFormatter(formatter)
         fh.setLevel(logging.DEBUG)
         _logger.addHandler(fh)
 
     _logger.info("Parsing XML Files..")
 
-    if target_path and not os.path.exists(target_path):
-        _logger.error("invalid target_path specified")
+    if output_path and not os.path.exists(output_path):
+        _logger.error("invalid output_path specified")
         sys.exit(1)
 
-    # open target files
+    # open xml files
     file_list = list(
         set(
             [
@@ -567,10 +552,8 @@ def convert_xml(
         _logger.info("Parsing files in the following order:")
         _logger.info(file_list)
 
-    for filename in file_list:
-        path, xml_file = os.path.split(os.path.realpath(filename))
-
-        output_file = xml_file
+    for xml_file in file_list:
+        path, output_file = os.path.split(os.path.realpath(xml_file))
 
         if output_file.endswith(".gz"):
             output_file = output_file[:-3]
@@ -586,11 +569,11 @@ def convert_xml(
 
         output_file = output_file + "." + output_format.lower()
 
-        if zip and output_format in ["json", "jsonl", "txt", "csv"]:
+        if gzipfile and output_format in ["json", "jsonl", "txt", "csv"]:
             output_file = output_file + ".gz"
 
-        if target_path:
-            output_file = os.path.join(target_path, output_file)
+        if output_path:
+            output_file = os.path.join(output_path, output_file)
             if no_overwrite and os.path.isfile(output_file):
                 _logger.info("No overwrite. Skipping " + xml_file)
                 continue
@@ -600,39 +583,52 @@ def convert_xml(
                 _logger.info("No overwrite. Skipping " + xml_file)
                 continue
 
+        if flatten is True:
+            flat_attributes = True
+            flat_elements = True
+        elif flatten == "attributes":
+            flat_attributes = True
+            flat_elements = False
+        elif flatten == "elements":
+            flat_attributes = False
+            flat_elements = True
+        else:
+            flat_attributes = False
+            flat_elements = False
+
         if multi > 1:
             parse_queue_pool.apply_async(
-                parse_file,
+                parse_xml_file,
                 args=(
-                    filename,
-                    output_file,
                     xsd_file,
-                    flat_attributes,
-                    flat_lists,
+                    xml_file,
+                    xml_path,
+                    output_file,
+                    output_path,
                     max_recursion,
-                    output_format,
-                    zip,
-                    xpath,
                     rows_per_batch,
-                    target_path,
+                    output_format,
+                    gzipfile,
                     delete_xml,
+                    flat_attributes,
+                    flat_elements,
                 ),
                 error_callback=_logger.info,
             )
         else:
-            parse_file(
-                filename,
-                output_file,
+            parse_xml_file(
                 xsd_file,
-                flat_attributes,
-                flat_lists,
+                xml_file,
+                xml_path,
+                output_file,
+                output_path,
                 max_recursion,
-                output_format,
-                zip,
-                xpath,
                 rows_per_batch,
-                target_path,
+                output_format,
+                gzipfile,
                 delete_xml,
+                flat_attributes,
+                flat_elements,
             )
 
     if multi > 1:

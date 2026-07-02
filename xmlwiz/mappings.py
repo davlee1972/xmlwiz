@@ -25,7 +25,7 @@ from enum import IntEnum
 import pyarrow as pa
 
 
-class XpathTypeEnum(IntEnum):  # stored as a non-mutable tuple in xpath index.
+class xpathType(IntEnum):  # stored as a non-mutable tuple in xpath index.
     NAME = 0
     ELEMENT_TYPE = 1  # element type from list below.
     PYARROW_TYPE = 2  # pyarrow type to cast from xml string or python type.
@@ -39,7 +39,7 @@ class XpathTypeEnum(IntEnum):  # stored as a non-mutable tuple in xpath index.
     VALUE = 8  # list for rowcount, offset and vector values
 
 
-class XpathValueEnum(IntEnum):  # stored as a mutable list in xpath index
+class xpathValue(IntEnum):  # stored as a mutable list in xpath index
     # The values below are used to capture xml data
     ROWCOUNT = 0  # current rowcount for LIST or LIST_OF_DICT.
     OFFSETS = 1  # offsets vector buffer. set by parent LIST types.
@@ -51,7 +51,7 @@ class XpathValueEnum(IntEnum):  # stored as a mutable list in xpath index
     CHILD_FIELDS = 6  # adjusted child fields
 
 
-class ElementTypeEnum(IntEnum):
+class ElementType(IntEnum):
     LIST = 1
     # Only used when flattening content with no attributes and a single element.
     # with max_occurs > 0.
@@ -130,14 +130,14 @@ XSD_TO_PYARROW = {
 # used to convert element text to python types
 # this is needed if pyarrow cannot cast string values directly to pyarrow types
 XSD_TO_ELEMENT_DECODE = {
-    "decimal": ElementTypeEnum.DECIMAL,
-    "date": ElementTypeEnum.DATE,
-    "time": ElementTypeEnum.TIME,
-    "dateTime": ElementTypeEnum.TIMESTAMP,
-    "duration": ElementTypeEnum.DURATION,
-    "gYearMonth": ElementTypeEnum.GEGORIAN,
-    "gYear": ElementTypeEnum.GEGORIAN,
-    "gMonthDay": ElementTypeEnum.GEGORIAN,
-    "gDay": ElementTypeEnum.GEGORIAN,
-    "gMonth": ElementTypeEnum.GEGORIAN,
+    "decimal": ElementType.DECIMAL,
+    "date": ElementType.DATE,
+    "time": ElementType.TIME,
+    "dateTime": ElementType.TIMESTAMP,
+    "duration": ElementType.DURATION,
+    "gYearMonth": ElementType.GEGORIAN,
+    "gYear": ElementType.GEGORIAN,
+    "gMonthDay": ElementType.GEGORIAN,
+    "gDay": ElementType.GEGORIAN,
+    "gMonth": ElementType.GEGORIAN,
 }

@@ -28,9 +28,9 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from xmlwiz.mappings import (
-    XpathTypeEnum,
-    XpathValueEnum,
-    ElementTypeEnum,
+    xpathType,
+    xpathValue,
+    ElementType,
     XSD_TO_PYARROW,
     XSD_TO_ELEMENT_DECODE,
 )
@@ -39,25 +39,25 @@ from xmlwiz.mappings import (
 def element_decode_type(elem_text, element_type):
     # handles decoding element types to python types compatible with pyarrow types
 
-    if isinstance(element_type, tuple) and element_type[0] == ElementTypeEnum.LIST:
+    if isinstance(element_type, tuple) and element_type[0] == ElementType.LIST:
         elem_list = elem_text.split(" ")
         elem_list = [
             element_element_type(elem_item, element_type[1]) for elem_item in elem_list
         ]
         return elem_list
-    elif element_type == ElementTypeEnum.DECIMAL:
+    elif element_type == ElementType.DECIMAL:
         return Decimal(elem_text)
-    elif element_type == ElementTypeEnum.DURATION:
+    elif element_type == ElementType.DURATION:
         dur = isodate.parse_duration(elem_text)
         microseconds = int(dur.total_seconds() * 1_000_000)
         return microseconds
-    elif element_type == ElementTypeEnum.DATE:
+    elif element_type == ElementType.DATE:
         return datetime.fromisoformat(elem_text).date()
-    elif element_type == ElementTypeEnum.TIMESTAMP:
+    elif element_type == ElementType.TIMESTAMP:
         return datetime.fromisoformat(elem_text)
-    elif element_type == ElementTypeEnum.TIME:
+    elif element_type == ElementType.TIME:
         return datetime.strptime(elem_text, "%H:%M:%S %z").time()
-    elif element_type == ElementTypeEnum.GEGORIAN:
+    elif element_type == ElementType.GEGORIAN:
         date_parts = elem_text.split("-")
         date_len = len(date_parts)
         """
@@ -208,18 +208,18 @@ def map_xsd_type_to_arrow(xsd_type):
 
     if base_type.is_list():
         local_name = base_type.item_type.local_name
-        element_type = XSD_TO_ELEMENT_DECODE.get(local_name, ElementTypeEnum.OTHER)
+        element_type = XSD_TO_ELEMENT_DECODE.get(local_name, ElementType.OTHER)
         pyarrow_type = XSD_TO_PYARROW.get(local_name, pa.string())
         if pyarrow_type == "numeric":
             pyarrow_type = pyarrow_numeric(xsd_type)
         pyarrow_validation = None
         return (
-            (ElementTypeEnum.LIST, element_type),
+            (ElementType.LIST, element_type),
             pa.list_(pyarrow_type),
             pyarrow_validation,
         )
     else:
-        element_type = XSD_TO_ELEMENT_DECODE.get(local_name, ElementTypeEnum.OTHER)
+        element_type = XSD_TO_ELEMENT_DECODE.get(local_name, ElementType.OTHER)
         pyarrow_type = XSD_TO_PYARROW.get(local_name, pa.string())
         if pyarrow_type == "numeric":
             pyarrow_type = pyarrow_numeric(xsd_type)
@@ -293,7 +293,7 @@ def convert_xsd_elem(elem, xpath_index, xpath, max_recursion, recursion_check_li
                     tuple(xpath + [elem.local_name, elem.local_name + "@attributes"])
                 ] = (
                     elem.local_name + "@attributes",
-                    ElementTypeEnum.DICT,
+                    ElementType.DICT,
                     None,
                     attributes_nullable,
                     None,
@@ -309,7 +309,7 @@ def convert_xsd_elem(elem, xpath_index, xpath, max_recursion, recursion_check_li
         if elem.max_occurs is None or elem.max_occurs > 1:
             xpath_index[level][xpath_key] = (
                 elem.local_name,
-                ElementTypeEnum.LIST_OF_DICT,
+                ElementType.LIST_OF_DICT,
                 None,
                 nullable,
                 None,
@@ -321,7 +321,7 @@ def convert_xsd_elem(elem, xpath_index, xpath, max_recursion, recursion_check_li
         else:
             xpath_index[level][xpath_key] = (
                 elem.local_name,
-                ElementTypeEnum.DICT,
+                ElementType.DICT,
                 None,
                 nullable,
                 None,
@@ -401,7 +401,7 @@ def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
         0: {
             (): (
                 None,
-                ElementTypeEnum.DICT,
+                ElementType.DICT,
                 None,
                 False,
                 None,
@@ -430,7 +430,7 @@ def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
     if len(xpath_index[1]) > 1:
         for key, xpath_type in xpath_index[1].items():
             xpath_type = list(xpath_type)
-            xpath_type[XpathTypeEnum.NULLABLE] = True
+            xpath_type[xpathType.NULLABLE] = True
             xpath_type = tuple(xpath_type)
             xpath_index[1][key] = xpath_type
 
@@ -442,7 +442,7 @@ def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
             for child, child_type in xpath_index[level + 1].items():
                 if child[:-1] == parent:
                     child_type = list(child_type)
-                    child_type[XpathTypeEnum.PARENT] = xpath_index[level][parent]
+                    child_type[xpathType.PARENT] = xpath_index[level][parent]
                     child_type = tuple(child_type)
                     xpath_index[level + 1][child] = child_type
 
@@ -452,14 +452,14 @@ def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
 
         for child, child_type in xpath_index[level].items():
             parent = child[:-1]
-            grouped_dict.setdefault(parent, {})[child_type[XpathTypeEnum.NAME]] = (
+            grouped_dict.setdefault(parent, {})[child_type[xpathType.NAME]] = (
                 child_type
             )
 
         for parent, children in grouped_dict.items():
             parent_type = xpath_index[level - 1][parent]
             parent_type = list(parent_type)
-            parent_type[XpathTypeEnum.CHILDREN] = children
+            parent_type[xpathType.CHILDREN] = children
             parent_type = tuple(parent_type)
             xpath_index[level - 1][parent] = parent_type
 
@@ -467,64 +467,64 @@ def convert_xsd_to_xpath_index(xsd_schema, max_recursion=2):
 
 
 def convert_xpath_index_to_pyarrow_schema(
-    xpath_index, xpath_list=None, flat_attribs=False, flat_elements=False
+    xpath_index, xpath_list=None, flat_attributes=False, flat_elements=False
 ):
 
     # fill in field values used for formatting results
     for level, elems in xpath_index.items():
         for elem_type in elems.values():
-            elem_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_NAME] = elem_type[
-                XpathTypeEnum.NAME
+            elem_type[xpathType.VALUE][xpathValue.FIELD_NAME] = elem_type[
+                xpathType.NAME
             ]
-            elem_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE] = elem_type[
-                XpathTypeEnum.PYARROW_TYPE
+            elem_type[xpathType.VALUE][xpathValue.FIELD_TYPE] = elem_type[
+                xpathType.PYARROW_TYPE
             ]
-            elem_type[XpathTypeEnum.VALUE][XpathValueEnum.PARENT_FIELD] = elem_type[
-                XpathTypeEnum.PARENT
+            elem_type[xpathType.VALUE][xpathValue.PARENT_FIELD] = elem_type[
+                xpathType.PARENT
             ]
-            elem_type[XpathTypeEnum.VALUE][XpathValueEnum.CHILD_FIELDS] = elem_type[
-                XpathTypeEnum.CHILDREN
+            elem_type[xpathType.VALUE][xpathValue.CHILD_FIELDS] = elem_type[
+                xpathType.CHILDREN
             ]
 
     # flatten @attributes
-    if flat_attribs:
+    if flat_attributes:
         for level in list(xpath_index.keys())[2:]:
             for parent, parent_type in xpath_index[level].items():
                 # attributes
                 if parent[-1].endswith("@attributes"):
                     # add all @attributes children to @attribute's parent
                     # remove @attributes from @attribute's parent
-                    parent_parent = parent_type[XpathTypeEnum.VALUE][
-                        XpathValueEnum.PARENT_FIELD
+                    parent_parent = parent_type[xpathType.VALUE][
+                        xpathValue.PARENT_FIELD
                     ]
-                    parent_parent_children = parent_parent[XpathTypeEnum.VALUE][
-                        XpathValueEnum.CHILD_FIELDS
+                    parent_parent_children = parent_parent[xpathType.VALUE][
+                        xpathValue.CHILD_FIELDS
                     ]
 
-                    parent_parent_children = parent_type[XpathTypeEnum.VALUE][
-                        XpathValueEnum.CHILD_FIELDS
+                    parent_parent_children = parent_type[xpathType.VALUE][
+                        xpathValue.CHILD_FIELDS
                     ] | (parent_parent_children or {})
                     del parent_parent_children[parent[-1]]
 
-                    parent_parent[XpathTypeEnum.VALUE][XpathValueEnum.CHILD_FIELDS] = (
+                    parent_parent[xpathType.VALUE][xpathValue.CHILD_FIELDS] = (
                         parent_parent_children
                     )
 
-                    for child, child_type in parent_type[XpathTypeEnum.VALUE][
-                        XpathValueEnum.CHILD_FIELDS
+                    for child, child_type in parent_type[xpathType.VALUE][
+                        xpathValue.CHILD_FIELDS
                     ].items():
                         # change name from elem_name@attributes with attribute_name(s) to elem_name@attribute_name
                         # change child's parent to parent's parent
-                        child_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_NAME] = (
+                        child_type[xpathType.VALUE][xpathValue.FIELD_NAME] = (
                             parent[-1].removesuffix("attributes")
-                            + child_type[XpathTypeEnum.NAME]
+                            + child_type[xpathType.NAME]
                         )
-                        child_type[XpathTypeEnum.VALUE][XpathValueEnum.PARENT_FIELD] = (
+                        child_type[xpathType.VALUE][xpathValue.PARENT_FIELD] = (
                             parent_parent
                         )
                     # orphan @attributes by removing parent and children
-                    parent_type[XpathTypeEnum.VALUE][XpathValueEnum.PARENT_FIELD] = None
-                    parent_type[XpathTypeEnum.VALUE][XpathValueEnum.CHILD_FIELDS] = None
+                    parent_type[xpathType.VALUE][xpathValue.PARENT_FIELD] = None
+                    parent_type[xpathType.VALUE][xpathValue.CHILD_FIELDS] = None
 
     # flatten elements
     if flat_elements:
@@ -532,100 +532,109 @@ def convert_xpath_index_to_pyarrow_schema(
             for parent, parent_type in xpath_index[level].items():
                 # parent element has only one child
                 if (
-                    parent_type[XpathTypeEnum.VALUE][XpathValueEnum.CHILD_FIELDS]
+                    parent_type[xpathType.VALUE][xpathValue.CHILD_FIELDS]
                     and len(
-                        parent_type[XpathTypeEnum.VALUE][XpathValueEnum.CHILD_FIELDS]
+                        parent_type[xpathType.VALUE][xpathValue.CHILD_FIELDS]
                     )
                     == 1
                 ):
-
                     # parent is item@attributes
                     # child is partnum
 
-                    parent_parent = parent_type[XpathTypeEnum.VALUE][
-                        XpathValueEnum.PARENT_FIELD
+                    parent_parent = parent_type[xpathType.VALUE][
+                        xpathValue.PARENT_FIELD
                     ]
-                    parent_parent_children = parent_parent[XpathTypeEnum.VALUE][
-                        XpathValueEnum.CHILD_FIELDS
+                    parent_parent_children = parent_parent[xpathType.VALUE][
+                        xpathValue.CHILD_FIELDS
                     ]
 
                     # get child and assign it a new parent
-                    child, child_type = next(iter(parent_type[XpathTypeEnum.VALUE][
-                            XpathValueEnum.CHILD_FIELDS
-                        ].items()))
+                    child, child_type = next(
+                        iter(
+                            parent_type[xpathType.VALUE][
+                                xpathValue.CHILD_FIELDS
+                            ].items()
+                        )
+                    )
 
-                    child_type[XpathTypeEnum.VALUE][XpathValueEnum.PARENT_FIELD] = (
+                    child_type[xpathType.VALUE][xpathValue.PARENT_FIELD] = (
                         parent_parent
                     )
 
-                    pos = list(parent_parent_children).index(parent_type[XpathTypeEnum.NAME])
+                    pos = list(parent_parent_children).index(
+                        parent_type[xpathType.NAME]
+                    )
                     items = list(parent_parent_children.items())
                     # keep original field name if it isn't @attributes
                     if items[pos][0].endswith("@attributes"):
-                        child_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_NAME] = items[pos][0].removesuffix("attributes") + child_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_NAME]
+                        child_type[xpathType.VALUE][xpathValue.FIELD_NAME] = (
+                            items[pos][0].removesuffix("attributes")
+                            + child_type[xpathType.VALUE][xpathValue.FIELD_NAME]
+                        )
                     else:
-                        child_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_NAME] = items[pos][0]
+                        child_type[xpathType.VALUE][xpathValue.FIELD_NAME] = (
+                            items[pos][0]
+                        )
                     items[pos] = (child, child_type)
 
-                    parent_parent[XpathTypeEnum.VALUE][
-                        XpathValueEnum.CHILD_FIELDS
-                    ] = dict(items)
+                    parent_parent[xpathType.VALUE][xpathValue.CHILD_FIELDS] = (
+                        dict(items)
+                    )
 
                     # orphan parent by removing parent and children
-                    parent_type[XpathTypeEnum.VALUE][XpathValueEnum.PARENT_FIELD] = None
-                    parent_type[XpathTypeEnum.VALUE][XpathValueEnum.CHILD_FIELDS] = None
+                    parent_type[xpathType.VALUE][xpathValue.PARENT_FIELD] = None
+                    parent_type[xpathType.VALUE][xpathValue.CHILD_FIELDS] = None
 
     # convert xpath index to pyarrow schema
     for level in reversed(list(xpath_index.keys())):
         for parent, parent_type in xpath_index[level].items():
             if (
-                not parent_type[XpathTypeEnum.VALUE][XpathValueEnum.CHILD_FIELDS]
-                and not parent_type[XpathTypeEnum.VALUE][XpathValueEnum.PARENT_FIELD]
+                not parent_type[xpathType.VALUE][xpathValue.CHILD_FIELDS]
+                and not parent_type[xpathType.VALUE][xpathValue.PARENT_FIELD]
             ):
                 continue
 
             if (
-                isinstance(parent_type[XpathTypeEnum.ELEMENT_TYPE], tuple)
-                and parent_type[XpathTypeEnum.ELEMENT_TYPE][0] == ElementTypeEnum.LIST
+                isinstance(parent_type[xpathType.ELEMENT_TYPE], tuple)
+                and parent_type[xpathType.ELEMENT_TYPE][0] == ElementType.LIST
             ):
-                parent_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE] = pa.list_(
-                    parent_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE]
+                parent_type[xpathType.VALUE][xpathValue.FIELD_TYPE] = pa.list_(
+                    parent_type[xpathType.VALUE][xpathValue.FIELD_TYPE]
                 )
 
-            elif parent_type[XpathTypeEnum.ELEMENT_TYPE] in [
-                ElementTypeEnum.DICT,
-                ElementTypeEnum.LIST_OF_DICT,
+            elif parent_type[xpathType.ELEMENT_TYPE] in [
+                ElementType.DICT,
+                ElementType.LIST_OF_DICT,
             ]:
-
                 struct_type = pa.struct(
                     [
                         pa.field(
-                            child_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_NAME],
-                            child_type[XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE],
-                            nullable=child_type[XpathTypeEnum.NULLABLE],
+                            child_type[xpathType.VALUE][xpathValue.FIELD_NAME],
+                            child_type[xpathType.VALUE][xpathValue.FIELD_TYPE],
+                            nullable=child_type[xpathType.NULLABLE],
                         )
-                        for child_type in parent_type[XpathTypeEnum.VALUE][
-                            XpathValueEnum.CHILD_FIELDS
+                        for child_type in parent_type[xpathType.VALUE][
+                            xpathValue.CHILD_FIELDS
                         ].values()
                     ]
                 )
 
-                if parent_type[XpathTypeEnum.ELEMENT_TYPE] == ElementTypeEnum.DICT:
-                    xpath_index[level][parent][XpathTypeEnum.VALUE][
-                        XpathValueEnum.FIELD_TYPE
+                if parent_type[xpathType.ELEMENT_TYPE] == ElementType.DICT:
+                    xpath_index[level][parent][xpathType.VALUE][
+                        xpathValue.FIELD_TYPE
                     ] = struct_type
                 elif (
-                    parent_type[XpathTypeEnum.ELEMENT_TYPE]
-                    == ElementTypeEnum.LIST_OF_DICT
+                    parent_type[xpathType.ELEMENT_TYPE]
+                    == ElementType.LIST_OF_DICT
                 ):
-                    xpath_index[level][parent][XpathTypeEnum.VALUE][
-                        XpathValueEnum.FIELD_TYPE
+                    xpath_index[level][parent][xpathType.VALUE][
+                        xpathValue.FIELD_TYPE
                     ] = pa.list_(struct_type)
 
     if xpath_list:
         level = len(xpath_list)
-        return xpath_index[level][tuple(xpath_list)][XpathTypeEnum.VALUE][
-            XpathValueEnum.FIELD_TYPE
+        return xpath_index[level][tuple(xpath_list)][xpathType.VALUE][
+            xpathValue.FIELD_TYPE
         ]
     else:
-        return xpath_index[0][()][XpathTypeEnum.VALUE][XpathValueEnum.FIELD_TYPE]
+        return xpath_index[0][()][xpathType.VALUE][xpathValue.FIELD_TYPE]
