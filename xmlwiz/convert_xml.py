@@ -47,7 +47,7 @@ from lxml import etree
 
 from xmlwiz.mappings import ElementType, xpathType, xpathValue
 
-from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_xpath_index, convert_xpath_index_to_pyarrow_schema, element_decode_type
+from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_xpath_index, convert_xpath_index_to_pyarrow_schema, xml_to_python
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -77,9 +77,15 @@ def json_decoder(obj):
 
 
 def parse_xml(xml_file, parser_index, xpath_list):
-    current_xpath = []
+
     current_level = 0
-    elem_tracker = parser_index[0][()]
+    current_xpath = []
+
+    xpath_elem = parser_index[0][()]
+    xpath_key = []
+    xpath_parent = None
+
+    skip = False
 
     context = etree.iterparse(
         xml_file,
@@ -91,104 +97,50 @@ def parse_xml(xml_file, parser_index, xpath_list):
 
     for event, elem in context:
         elem.tag = etree.QName(elem.tag).localname
-        print(elem.tag)
+        current_level += 1
+        current_xpath += [elem.tag]
 
         if event == "start":
-            current_xpath.append(elem.tag)
-            current_level += 1
-
-            current_xpath_key = tuple(current_xpath)
-            try:
-                [element_type, parent, obj] = parser_index[current_level][
-                    tuple(current_xpath_key)
-                ]
-            except KeyError:
-                continue
-
-            if element_type[0] in [ElementType.DICT, ElementType.LIST]:
-                attributes = {}
-                for k, v in elem.attrib.items():
-                    k = etree.QName(k).localname
-                    try:
-                        attr_type = parser_index[current_level][
-                            tuple(current_xpath + [k])
-                        ][0][0]
-                        attr_data = element_decode(v, attr_type)
-                        attributes[k] = attr_data
-                    except KeyError:
-                        pass
-                if attributes:
-                    print(":==================")
-                    try:
-                        parser_index[current_level][
-                            tuple(current_xpath + ["@attributes"])
-                        ][xpathType.OBJ] = attributes
-                        print(":==================")
-                        if parent[xpathType.OBJ] is None:
-                            parent[xpathType.OBJ] = {}
-                        parent[xpathType.OBJ]["@attributes"] = attributes
-                        print(":==================")
-                    except KeyError:
-                        if obj is None:
-                            parser_index[current_level][current_xpath_key][
-                                xpathType.OBJ
-                            ] = {}
-                        attributes = {
-                            elem.tag + "@" + k: v for k, v in attributes.items()
-                        }
-                        parser_index[current_level][current_xpath_key][
-                            xpathType.OBJ
-                        ].update(attributes)
+            if elem.tag in xpath_elem[xpathType.CHILDREN] and xpath_key + [elem.tag] == current_xpath:
+                skip = False
+                xpath_key += [elem.tag]
+                xpath_parent = xpath_elem
+                xpath_elem = xpath_elem[xpathType.CHILDREN][elem.tag]
+                if xpath_elem[xpathType.ELEMENT_TYPE] in [ElementType.DICT, ElementType.LIST_OF_DICT]:
+                    for k, v in elem.attrib.items():
+                        attr_tag = etree.QName(k).localname
+                        attr_group = xpath_elem[xpathType.CHILDREN][elem.tag + "@attributes"]
+                        attribute = attr_group[xpathType.CHILDREN][attr_tag]
+                        attr_data = xml_to_python(v, attribute[xpathType.ELEMENT_TYPE])
+                        if attribute[xpathType.VALUE][xpathValue.VECTOR] is None:
+                            attribute[xpathType.VALUE][xpathValue.VECTOR] = []
+                        attribute[xpathType.VALUE][xpathValue.VECTOR].append(attr_data)
+            else:
+                skip = True
 
         elif event == "end":
-            current_xpath_key = tuple(current_xpath)
-            try:
-                [element_type, parent, obj] = parser_index[current_level][
-                    current_xpath_key
-                ]
-            except KeyError:
-                elem.clear()
-                current_level -= 1
-                del current_xpath[-1]
-                continue
-
-            if element_type[0] in [ElementType.DICT, ElementType.LIST]:
-                data = obj
-            else:
-                data = element_decode(elem.text, element_type[0])
-
-            # flush data to parent
-            if data:
-                if parent[xpathType.OBJ] is None:
-                    parent[xpathType.OBJ] = {}
-
-                if element_type[0] == ElementType.DICT:
-                    parent[xpathType.OBJ][elem.tag] = data.copy()
-                    parser_index[current_level][current_xpath_key][
-                        xpathType.OBJ
-                    ] = None
-                elif element_type[0] == ElementType.LIST:
-                    if elem.tag not in parent[xpathType.OBJ]:
-                        parent[xpathType.OBJ][elem.tag] = []
-                    parent[xpathType.OBJ][elem.tag].append(data.copy())
-                    parser_index[current_level][current_xpath_key][
-                        xpathType.OBJ
-                    ] = None
-                else:
-                    parent[xpathType.OBJ].update({elem.tag: data})
-
-            if current_xpath == xpath_list:
-                if element_type[0] == ElementType.DICT:
-                    yield data
-                else:
-                    yield [data]
+            elem.tag = etree.QName(elem.tag).localname
+            if skip == False:
+                elem.tag = etree.QName(elem.tag).localname
+                elem_data = xml_to_python(elem.text, xpath_elem[xpathType.ELEMENT_TYPE])
+                if xpath_elem[xpathType.VALUE][xpathValue.VECTOR] is None:
+                    xpath_elem[xpathType.VALUE][xpathValue.VECTOR] = []
+                xpath_elem[xpathType.VALUE][xpathValue.VECTOR].append(elem_data)
+                xpath_elem = xpath_elem[xpathType.PARENT]
+                del xpath_key[-1] 
 
             elem.clear()
             current_level -= 1
             del current_xpath[-1]
 
     if not xpath_list:
-        yield parser_index[0][()][xpathType.OBJ]
+        for level in parser_index:
+            for k, v in parser_index[level].items():
+                print("==============")
+                print(level)
+                print(k)
+                print(v[xpathType.VALUE][xpathValue.VECTOR])
+        yield parser_index[0][()][xpathType.VALUE][xpathValue.VECTOR]
 
 
 def open_gzip_file(gzipfile, filename):
@@ -241,7 +193,6 @@ def write_json(
         for xml_batch in xml_batcher(
             xml_file, parser_index, xpath_list, rows_per_batch
         ):
-            print(xml_batch)
 
             arrow_obj = pa.array(xml_batch).cast(schema_type)
 
@@ -405,7 +356,26 @@ def parse_xml_file(
         xpath_index, xpath_list, flat_attributes, flat_elements
     )
 
+    print("zzz")
+    print(xpath_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.NAME])
+    print(xpath_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.CHILDREN].keys())
+    print(xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT][xpathType.NAME])
+    print(xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT] == xpath_index[2][tuple(["purchaseOrder", "shipTo"])])
+    print(xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT][xpathType.CHILDREN].keys())
+    print("zzz")
+
     parser_index = xpath_index.copy()
+    
+    parser_index = {}
+    for level in xpath_index:
+        parser_index[level] = {}
+        for k, v in xpath_index[level].items():
+            parser_index[level][k] = v
+
+    print("zzz")
+    print(parser_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.CHILDREN].keys())
+    print("zzz")
+
 
     if xpath_list:
         parser_levels = len(parser_index)

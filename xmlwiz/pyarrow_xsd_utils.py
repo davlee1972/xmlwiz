@@ -36,8 +36,8 @@ from xmlwiz.mappings import (
 )
 
 
-def element_decode_type(elem_text, element_type):
-    # handles decoding element types to python types compatible with pyarrow types
+def xml_to_python(elem_text, element_type):
+    # handles decoding element text to python data
 
     if isinstance(element_type, tuple) and element_type[0] == ElementType.LIST:
         elem_list = elem_text.split(" ")
