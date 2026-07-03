@@ -1,4 +1,4 @@
-# **XML Wizard Converter**
+# **XML Wizard**
 
 ## This project is currently in its initial stages of development and prototyping
 
@@ -14,41 +14,38 @@ This is very similar to Java's SAX parser.\
 Files are processed in order with the largest files first to optimize overall parsing time
 
 # How to run?
-```python
-python xml_to_json.py
+```shell
+python xml_wiz.py
 ```
 
 # Parameters
-```python
-usage: xml_wiz.py [-h] -x XSD_FILE [-o OUTPUT_FORMAT]
-                      [-t TARGET_PATH] [-z] [-p XPATH] 
-                      [-m MULTI] [-l LOG] [-v VERBOSE] [-n]
-                      ...
-
-XML To JSON Parser
-
-positional arguments:
-  xml_files             xml files to convert
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -x XSD_FILE, --xsd_file XSD_FILE
-                        xsd file name
-  -o OUTPUT_FORMAT, --output_format OUTPUT_FORMAT
-                        output format jsonl, jsonl or parquet. Default is jsonl.
-  -t TARGET_PATH, --target_path TARGET_PATH
-                        target directory.
-  -z, --zip             gzip output file
-  -p XPATH, --xpath XPATH
-                        xpath to parse out.
-  -m MULTI, --multi MULTI
-                        number of parsers. Default is 1.
-  -l LOG, --log LOG     log file
-  -v VERBOSE, --verbose VERBOSE
-                        verbose output level. INFO, DEBUG, etc.
-  -n, --no_overwrite    do not overwrite output file if it exists already
-
+```shell
+usage: xml_wiz.py [-h] -x XSD_FILE [--max_recursion MAX_RECURSION] [-p XPATH]
+                  [--rows_per_batch ROWS_PER_BATCH] [-m MULTI] [-o OUTPUT_FORMAT]
+                  [-t OUTPUT_PATH] [-z] [--no_overwrite] [--delete_xml]
+                  [--flatten [FLATTEN]] [-l LOG_LEVEL] [--log_file LOG_FILE]
+                  ...
+XML Wizard positional arguments: xml_files | xml files to convert
 ```
+
+| Option | Description |
+|--------|-------------|
+| -h, --help | show this help message and exit |
+| -x XSD_FILE, --xsd_file XSD_FILE | xsd file location. |
+| --max_recursion MAX_RECURSION | max recursions for self referencing elements. |
+| -p XPATH, --xpath XPATH | xpath to parse. |
+| --rows_per_batch ROWS_PER_BATCH |  number of rows to write per batch when using xpath. |
+| -m MULTI, --multi MULTI | number of parsers. default is 1. |
+| -o OUTPUT_FORMAT, --output_format OUTPUT_FORMAT | output format `json`, `jsonl` or `parquet`. default is jsonl. |
+| -t OUTPUT_PATH, --output_path OUTPUT_PATH | output directory. |
+| -z, --gzipfile | gzip output json file. |
+| --no_overwrite | do not overwrite output file if it exists already. |
+| --delete_xml | delete xml file after conversion. |
+| --flatten [FLATTEN] | Flatten results. (optional `attributes` or `elements`). |
+| -l LOG_LEVEL, --log_level LOG_LEVEL | logging level. INFO, DEBUG, etc. |
+| --log_file LOG_FILE | log file location. |
+| xml_files | list of xml files to convert. can include wildcards. |
+
 
 # Convert a small XML file to a JSONL file
 ```shell
