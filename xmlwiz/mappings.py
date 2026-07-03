@@ -25,32 +25,6 @@ from enum import IntEnum
 import pyarrow as pa
 
 
-class xpathType(IntEnum):  # stored as a non-mutable tuple in xpath index.
-    NAME = 0
-    ELEMENT_TYPE = 1  # element type from list below.
-    PYARROW_TYPE = 2  # pyarrow type to cast from xml string or python type.
-    NULLABLE = 3  # whether the type is nullable.
-    PARENT = 4  # tracks parent xpath index.
-    CHILDREN = 5  # tracks child xpath indexes used to set offsets or clear values.
-    CASTING_RULES = (
-        6  # pyarrow compute expression for xsd:restrictions transformations.
-    )
-    VALIDATION_RULES = 7  # pyarrow compute expression for xsd:restrictions checks.
-    VALUE = 8  # list for rowcount, offset and vector values
-
-
-class xpathValue(IntEnum):  # stored as a mutable list in xpath index
-    # The values below are used to capture xml data
-    ROWCOUNT = 0  # current rowcount for LIST or LIST_OF_DICT.
-    OFFSETS = 1  # offsets vector buffer. set by parent LIST types.
-    VECTOR = 2  # value vector buffer. element text goes in here.
-    # The values below are used for formatting results
-    FIELD_NAME = 3  # adjusted field name
-    FIELD_TYPE = 4  # adjusted pyarrow type
-    PARENT_FIELD = 5  # adjusted parent field
-    CHILD_FIELDS = 6  # adjusted child fields
-
-
 class ElementType(IntEnum):
     LIST = 1
     # Only used when flattening content with no attributes and a single element.
