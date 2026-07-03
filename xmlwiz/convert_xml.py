@@ -47,7 +47,11 @@ from lxml import etree
 
 from xmlwiz.mappings import ElementType, xpathType, xpathValue
 
-from xmlwiz.pyarrow_xsd_utils import convert_xsd_to_xpath_index, convert_xpath_index_to_pyarrow_schema, xml_to_python
+from xmlwiz.pyarrow_xsd_utils import (
+    convert_xsd_to_xpath_index,
+    convert_xpath_index_to_pyarrow_schema,
+    xml_to_python,
+)
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -101,15 +105,23 @@ def parse_xml(xml_file, parser_index, xpath_list):
         current_xpath += [elem.tag]
 
         if event == "start":
-            if elem.tag in xpath_elem[xpathType.CHILDREN] and xpath_key + [elem.tag] == current_xpath:
+            if (
+                elem.tag in xpath_elem[xpathType.CHILDREN]
+                and xpath_key + [elem.tag] == current_xpath
+            ):
                 skip = False
                 xpath_key += [elem.tag]
                 xpath_parent = xpath_elem
                 xpath_elem = xpath_elem[xpathType.CHILDREN][elem.tag]
-                if xpath_elem[xpathType.ELEMENT_TYPE] in [ElementType.DICT, ElementType.LIST_OF_DICT]:
+                if xpath_elem[xpathType.ELEMENT_TYPE] in [
+                    ElementType.DICT,
+                    ElementType.LIST_OF_DICT,
+                ]:
                     for k, v in elem.attrib.items():
                         attr_tag = etree.QName(k).localname
-                        attr_group = xpath_elem[xpathType.CHILDREN][elem.tag + "@attributes"]
+                        attr_group = xpath_elem[xpathType.CHILDREN][
+                            elem.tag + "@attributes"
+                        ]
                         attribute = attr_group[xpathType.CHILDREN][attr_tag]
                         attr_data = xml_to_python(v, attribute[xpathType.ELEMENT_TYPE])
                         if attribute[xpathType.VALUE][xpathValue.VECTOR] is None:
@@ -127,7 +139,7 @@ def parse_xml(xml_file, parser_index, xpath_list):
                     xpath_elem[xpathType.VALUE][xpathValue.VECTOR] = []
                 xpath_elem[xpathType.VALUE][xpathValue.VECTOR].append(elem_data)
                 xpath_elem = xpath_elem[xpathType.PARENT]
-                del xpath_key[-1] 
+                del xpath_key[-1]
 
             elem.clear()
             current_level -= 1
@@ -193,7 +205,6 @@ def write_json(
         for xml_batch in xml_batcher(
             xml_file, parser_index, xpath_list, rows_per_batch
         ):
-
             arrow_obj = pa.array(xml_batch).cast(schema_type)
 
             if pa.types.is_struct(arrow_obj.type):
@@ -359,13 +370,24 @@ def parse_xml_file(
     print("zzz")
     print(xpath_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.NAME])
     print(xpath_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.CHILDREN].keys())
-    print(xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT][xpathType.NAME])
-    print(xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT] == xpath_index[2][tuple(["purchaseOrder", "shipTo"])])
-    print(xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT][xpathType.CHILDREN].keys())
+    print(
+        xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT][
+            xpathType.NAME
+        ]
+    )
+    print(
+        xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT]
+        == xpath_index[2][tuple(["purchaseOrder", "shipTo"])]
+    )
+    print(
+        xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT][
+            xpathType.CHILDREN
+        ].keys()
+    )
     print("zzz")
 
     parser_index = xpath_index.copy()
-    
+
     parser_index = {}
     for level in xpath_index:
         parser_index[level] = {}
@@ -373,9 +395,10 @@ def parse_xml_file(
             parser_index[level][k] = v
 
     print("zzz")
-    print(parser_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.CHILDREN].keys())
+    print(
+        parser_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.CHILDREN].keys()
+    )
     print("zzz")
-
 
     if xpath_list:
         parser_levels = len(parser_index)
@@ -396,7 +419,7 @@ def parse_xml_file(
         for i in range(level + 1, parser_levels):
             del_list = []
             for key in parser_index[i]:
-                if key[:len(xpath_list)] != tuple(xpath_list):
+                if key[: len(xpath_list)] != tuple(xpath_list):
                     del_list.append(key)
             if del_list:
                 for key in del_list:
