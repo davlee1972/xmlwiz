@@ -5,6 +5,7 @@ Author: David Lee
 """
 
 import argparse
+from xmlwiz.convert_xml import convert_xml
 
 
 def arg_flatten(value):
@@ -19,8 +20,6 @@ def arg_flatten(value):
         raise argparse.ArgumentTypeError("Boolean value expected.")
 
 
-from xmlwiz.convert_xml import convert_xml
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="XML Wizard")
 
@@ -33,7 +32,7 @@ if __name__ == "__main__":
         help="max recursions for self referencing elements.",
     )
 
-    parser.add_argument("-p", "--xpath", help="xpath to parse.")
+    parser.add_argument("-p", "--xml_path", help="xpath to parse.")
 
     parser.add_argument(
         "--rows_per_batch",
@@ -87,16 +86,14 @@ if __name__ == "__main__":
 
     parser.add_argument("--log_file", help="log file location.")
 
-    parser.add_argument(
-        "xml_files", nargs=argparse.REMAINDER, help="xml files to convert"
-    )
+    parser.add_argument("xml_files", nargs="+", help="xml files to convert")
 
     args = parser.parse_args()
 
     convert_xml(
         args.xsd_file,
         args.max_recursion,
-        args.xpath,
+        args.xml_path,
         args.rows_per_batch,
         args.multi,
         args.output_format,
