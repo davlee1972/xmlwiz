@@ -44,6 +44,7 @@ XML Wizard positional arguments: xml_files | xml files to convert
 | --flatten [FLATTEN] | Flatten results. (optional `attributes` or `elements`). |
 | -l LOG_LEVEL, --log_level LOG_LEVEL | logging level. INFO, DEBUG, etc. |
 | --log_file LOG_FILE | log file location. |
+| xml_files | xml files to convert. |
 
 
 # Convert a small XML file to a JSONL file
