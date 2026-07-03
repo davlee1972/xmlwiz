@@ -21,10 +21,11 @@ python xml_wiz.py
 # Parameters
 ```shell
 usage: xml_wiz.py [-h] -x XSD_FILE [--max_recursion MAX_RECURSION] [-p XPATH]
-                  [--rows_per_batch ROWS_PER_BATCH] [-m MULTI] [-o OUTPUT_FORMAT] [-t OUTPUT_PATH] [-z]
-                  [--no_overwrite] [--delete_xml] [--flatten [FLATTEN]] [-l LOG_LEVEL] [--log_file LOG_FILE]
+                  [--rows_per_batch ROWS_PER_BATCH] [-m MULTI] [-o OUTPUT_FORMAT]
+                  [-t OUTPUT_PATH] [-z] [--no_overwrite] [--delete_xml]
+                  [--flatten [FLATTEN]] [-l LOG_LEVEL] [--log_file LOG_FILE]
                   ...
-XML Wizard positional arguments: xml_files xml files to convert
+XML Wizard positional arguments: xml_files | xml files to convert
 ```
 
 | Option | Description |
@@ -35,12 +36,12 @@ XML Wizard positional arguments: xml_files xml files to convert
 | -p XPATH, --xpath XPATH | xpath to parse. |
 | --rows_per_batch ROWS_PER_BATCH |  number of rows to write per batch when using xpath. |
 | -m MULTI, --multi MULTI | number of parsers. default is 1. |
-| -o OUTPUT_FORMAT, --output_format OUTPUT_FORMAT | output format json or jsonl. default is jsonl. |
+| -o OUTPUT_FORMAT, --output_format OUTPUT_FORMAT | output format `json`, `jsonl` or `parquet`. default is jsonl. |
 | -t OUTPUT_PATH, --output_path OUTPUT_PATH | output directory. |
 | -z, --gzipfile | gzip output json file. |
 | --no_overwrite | do not overwrite output file if it exists already. |
 | --delete_xml | delete xml file after conversion. |
-| --flatten [FLATTEN] | Flatten results. (accepts optional 'attributes' or 'elements' values). |
+| --flatten [FLATTEN] | Flatten results. (optional `attributes` or `elements`). |
 | -l LOG_LEVEL, --log_level LOG_LEVEL | logging level. INFO, DEBUG, etc. |
 | --log_file LOG_FILE | log file location. |
 
