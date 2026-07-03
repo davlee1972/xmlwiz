@@ -28,6 +28,7 @@ XML Wizard positional arguments: xml_files xml files to convert
 ```
 
 | Option | Description |
+|--------|-------------|
 | -h, --help | show this help message and exit |
 | -x XSD_FILE, --xsd_file XSD_FILE | xsd file location. |
 | --max_recursion MAX_RECURSION | max recursions for self referencing elements. |
