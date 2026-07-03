@@ -90,6 +90,170 @@ class XmlNode:
                 self.children[name].remove(child)
         del self.children[name]
 
+    def find_elem(self, xpath_list):
+        if self.xpath == xpath_list:
+            return self
+        elif self.children:
+            for child_elem in self.children.values():
+                elem_found = child_elem.find_elem(xpath_list)
+                if elem_found:
+                    return elem_found
+
+    def find_field_elem(self, xpath_list):
+        if self.xpath == xpath_list:
+            return self
+        elif self.field_children:
+            for child_elem in self.field_children.values():
+                elem_found = child_elem.find_field_elem(xpath_list)
+                if elem_found:
+                    return elem_found
+
+    def get_data(self):
+        data = {}
+        data[tuple(self.xpath)] = self.data_vector
+        if self.field_children:
+            for child_elem in self.field_children.values():
+                child_data = child_elem.get_data()
+                data.update(child_data)
+        return data
+
+    def reset_and_trim_fields(self, xpath_list=None):
+        self.field_name = self.name
+        self.field_node_type = self.node_type
+        self.field_pyarrow_type = self.pyarrow_type
+        self.field_parent = self.parent
+        self.field_children = self.children
+
+        for child_elem in self.children.values():
+            child_elem.reset_and_trim_fields(xpath_list)
+
+        if xpath_list:
+            # attributes trimming is handled by parent
+            try:
+                if self.xpath[-1].endswith("@attributes"):
+                    return
+            except:
+                pass
+
+            try:
+                if self.field_parent.xpath[-1].endswith("@attributes"):
+                    return
+            except:
+                pass
+
+            # we do not have a match between xpath_list and self.xpath
+            if not all(a == b for a, b in zip(xpath_list, self.xpath)):
+                # if this xpath has attributes. remove them.
+                if self.field_name + "@attributes" in self.field_children:
+                    attributes_elem = self.field_children[self.field_name + "@attributes"]
+                    for child_attrib in attributes_elem.children.values():
+                        # clear fields under @attributes
+                        child_attrib.field_name = child_attrib.field_node_type = child_attrib.field_pyarrow_type = (
+                            child_attrib.field_parent
+                        ) = child_attrib.field_children = None
+
+                    # clear @attributes field
+                    attributes_elem.field_name = attributes_elem.field_node_type = attributes_elem.field_pyarrow_type = (
+                        attributes_elem.field_parent
+                    ) = attributes_elem.field_children = None
+                    # clear @attributes field
+
+                # remove this from parent_field.children
+                if self.field_parent:
+                    self.field_parent.field_children = {k: v for k, v in self.field_parent.field_children.items() if k != self.field_name}
+
+                # clear this field
+                self.field_name = self.field_node_type = self.field_pyarrow_type = (
+                    self.field_parent
+                ) = self.field_children = None
+
+    def flatten_elements(self):
+        if not self.name.endswith("@attributes") and len(self.field_children) == 1:
+            child, child_elem = next(iter(self.field_children.items()))
+            # move all child child items up a level
+            self.field_children = child_elem.field_children
+            self.field_node_type = child_elem.field_node_type
+            # change parent to this self
+            for child_elem2 in self.field_children.values():
+                child_elem2.field_parent = self
+            # clear out child
+            child_elem.field_name = child_elem.field_node_type = (
+                child_elem.field_pyarrow_type
+            ) = child_elem.field_parent = child_elem.field_children = None
+
+        for child_elem in self.field_children.values():
+            child_elem.flatten_elements()
+
+    def flatten_attributes(self):
+        if self.name.endswith("@attributes"):
+            # add all self children to self parent
+            # change parent for all self childre to self parent
+            # remove self as a child from self parent
+            # set self name, parent and children to None for skipping
+            old_children = self.field_parent.field_children
+            self.field_parent.field_children = {}
+            for child, child_elem in old_children.items():
+                if child == self.field_name:
+                    for child2, child_elem2 in self.field_children.items():
+                        child_elem2.field_parent = self.field_parent
+                        child_elem2.field_name = (
+                            self.field_name.removesuffix("attributes")
+                            + child_elem2.field_name
+                        )
+                        self.field_parent.field_children[child_elem2.field_name] = (
+                            child_elem2
+                        )
+                else:
+                    self.field_parent.field_children[child] = child_elem
+            self.field_name = self.field_node_type = self.field_pyarrow_type = (
+                self.field_parent
+            ) = self.field_children = None
+        else:
+            for child_elem in self.field_children.values():
+                child_elem.flatten_attributes()
+
+    # convert xpath element to pyarrow type
+    def set_pyarrow_type(self):
+
+        if (
+            isinstance(self.field_node_type, tuple)
+            and self.field_node_type[0] == ElementType.LIST
+        ):
+            self.field_pyarrow_type = pa.list_(self.field_pyarrow_type)
+            return (
+                self.field_name,
+                self.field_pyarrow_type,
+                self.nullable,
+            )
+
+        elif self.field_node_type in [ElementType.DICT, ElementType.LIST_OF_DICT]:
+            struct_fields = []
+            for child_elem in self.field_children.values():
+                struct_fields.append(child_elem.set_pyarrow_type())
+
+            struct_type = pa.struct(struct_fields)
+
+            if self.field_node_type == ElementType.DICT:
+                self.field_pyarrow_type = struct_type
+                return (
+                    self.field_name,
+                    self.field_pyarrow_type,
+                    self.nullable,
+                )
+            elif self.field_node_type == ElementType.LIST_OF_DICT:
+                self.field_pyarrow_type = pa.list_(struct_type)
+                return (
+                    self.field_name,
+                    self.field_pyarrow_type,
+                    self.nullable,
+                )
+        else:
+            return (
+                self.field_name,
+                self.field_pyarrow_type,
+                self.nullable,
+            )
+
 
 def xml_to_python(elem_text, element_type):
     # handles decoding element text to python data
@@ -404,7 +568,7 @@ def convert_xsd_elem(elem, xpath_elem, xpath, max_recursion, recursion_check_lis
                 old_recursion_check_list = recursion_check_list
                 if child_elem.type.is_complex() and child_elem.type.name:
                     # add element type name to recursion counter in case child elements come up more than twice (by default).
-                    recursion_check_list  = recursion_check_list + [child_elem.type.name]
+                    recursion_check_list = recursion_check_list + [child_elem.type.name]
                     if recursion_check_list.count(child_elem.type.name) > max_recursion:
                         recursion_check_list = old_recursion_check_list
                         continue
@@ -468,6 +632,7 @@ def find_field_elem(xpath_elem: XmlNode, xpath_list):
             if elem_found:
                 return elem_found
 
+
 def get_data_elem(xpath_elem: XmlNode):
     data = {}
     data[tuple(xpath_elem.xpath)] = xpath_elem.data_vector
@@ -482,123 +647,16 @@ def convert_xpath_tree_to_pyarrow_schema(
     xpath_root, xpath_list=None, flat_attributes=False, flat_elements=False
 ):
 
-    def reset_fields(xpath_elem: XmlNode):
-        xpath_elem.field_name = xpath_elem.name
-        xpath_elem.field_node_type = xpath_elem.node_type
-        xpath_elem.field_pyarrow_type = xpath_elem.pyarrow_type
-        xpath_elem.field_parent = xpath_elem.parent
-        xpath_elem.field_children = xpath_elem.children
-        for child_elem in xpath_elem.children.values():
-            reset_fields(child_elem)
-
-    reset_fields(xpath_root)
-
-    def flatten_elements(xpath_elem: XmlNode):
-        if (
-            not xpath_elem.name.endswith("@attributes")
-            and len(xpath_elem.field_children) == 1
-        ):
-            child, child_elem = next(iter(xpath_elem.field_children.items()))
-            # move all child child items up a level
-            xpath_elem.field_children = child_elem.field_children
-            xpath_elem.field_node_type = child_elem.field_node_type
-            # change parent to this xpath_elem
-            for child_elem2 in xpath_elem.field_children.values():
-                child_elem2.field_parent = xpath_elem
-            # clear out child
-            child_elem.field_name = None
-            child_elem.field_node_type = None
-            child_elem.field_pyarrow_type = None
-            child_elem.field_parent = None
-            child_elem.field_children = None
-
-        for child_elem in xpath_elem.field_children.values():
-            flatten_elements(child_elem)
+    xpath_root.reset_and_trim_fields(xpath_list)
 
     # flatten elements
     if flat_elements:
-        flatten_elements(xpath_root)
-
-    def flatten_attributes(xpath_elem: XmlNode):
-        if xpath_elem.name.endswith("@attributes"):
-            # add all xpath_elem children to xpath_elem parent
-            # change parent for all xpath_elem childre to xpath_elem parent
-            # remove xpath_elem as a child from xpath_elem parent
-            # set xpath_elem name, parent and children to None for skipping
-            old_children = xpath_elem.field_parent.field_children
-            xpath_elem.field_parent.field_children = {}
-            for child, child_elem in old_children.items():
-                if child == xpath_elem.field_name:
-                    for child2, child_elem2 in xpath_elem.field_children.items():
-                        child_elem2.field_parent = xpath_elem.field_parent
-                        child_elem2.field_name = (
-                            xpath_elem.field_name.removesuffix("attributes")
-                            + child_elem2.field_name
-                        )
-                        xpath_elem.field_parent.field_children[
-                            child_elem2.field_name
-                        ] = child_elem2
-                else:
-                    xpath_elem.field_parent.field_children[child] = child_elem
-            xpath_elem.field_name = None
-            xpath_elem.field_node_type = None
-            xpath_elem.field_pyarrow_type = None
-            xpath_elem.field_parent = None
-            xpath_elem.field_children = None
-        else:
-            for child_elem in xpath_elem.field_children.values():
-                flatten_attributes(child_elem)
+        xpath_root.flatten_elements()
 
     # flatten attributes
     if flat_attributes:
-        flatten_attributes(xpath_root)
+        xpath_root.flatten_attributes()
 
-    # convert xpath element to pyarrow type
-    def set_field_pyarrow_type(xpath_elem: XmlNode):
+    xpath_root.set_pyarrow_type()
 
-        if (
-            isinstance(xpath_elem.field_node_type, tuple)
-            and xpath_elem.field_node_type[0] == ElementType.LIST
-        ):
-            xpath_elem.field_pyarrow_type = pa.list_(xpath_elem.field_pyarrow_type)
-            return (
-                xpath_elem.field_name,
-                xpath_elem.field_pyarrow_type,
-                xpath_elem.nullable,
-            )
-
-        elif xpath_elem.field_node_type in [ElementType.DICT, ElementType.LIST_OF_DICT]:
-            struct_fields = []
-            for child_elem in xpath_elem.field_children.values():
-                struct_fields.append(set_field_pyarrow_type(child_elem))
-
-            struct_type = pa.struct(struct_fields)
-
-            if xpath_elem.field_node_type == ElementType.DICT:
-                xpath_elem.field_pyarrow_type = struct_type
-                return (
-                    xpath_elem.field_name,
-                    xpath_elem.field_pyarrow_type,
-                    xpath_elem.nullable,
-                )
-            elif xpath_elem.field_node_type == ElementType.LIST_OF_DICT:
-                xpath_elem.field_pyarrow_type = pa.list_(struct_type)
-                return (
-                    xpath_elem.field_name,
-                    xpath_elem.field_pyarrow_type,
-                    xpath_elem.nullable,
-                )
-        else:
-            return (
-                xpath_elem.field_name,
-                xpath_elem.field_pyarrow_type,
-                xpath_elem.nullable,
-            )
-
-    set_field_pyarrow_type(xpath_root)
-
-    if xpath_list:
-        elem_found = find_field_elem(xpath_root, xpath_list)
-        return elem_found.field_pyarrow_type
-    else:
-        return xpath_root.field_pyarrow_type
+    return xpath_root.field_pyarrow_type

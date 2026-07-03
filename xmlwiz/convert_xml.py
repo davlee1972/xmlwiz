@@ -32,7 +32,7 @@ from datetime import datetime, date, time, timedelta
 import decimal
 
 import json
-import glob
+from glob import glob
 
 import gzip
 import tarfile
@@ -45,13 +45,12 @@ from pyarrow.lib import ArrowTypeError
 import xmlschema
 from lxml import etree
 
-from xmlwiz.mappings import ElementType 
+from xmlwiz.mappings import ElementType
 
 from xmlwiz.pyarrow_xsd_utils import (
     convert_xsd_to_xpath_tree,
     convert_xpath_tree_to_pyarrow_schema,
     xml_to_python,
-    get_data_elem,
 )
 
 _logger = logging.getLogger(__name__)
@@ -83,10 +82,10 @@ def json_decoder(obj):
 
 def parse_xml(xml_file, xpath_root, xpath_list):
 
+    xpath_elem = xpath_root
+
     current_level = 0
     current_xpath = []
-
-    xpath_elem = xpath_root
 
     skip = False
 
@@ -96,7 +95,7 @@ def parse_xml(xml_file, xpath_root, xpath_list):
             "start",
             "end",
         ),
-        remove_blank_text=True
+        remove_blank_text=True,
     )
 
     for event, elem in context:
@@ -106,23 +105,28 @@ def parse_xml(xml_file, xpath_root, xpath_list):
             current_xpath.append(elem.tag)
 
             if (
-                elem.tag in xpath_elem.field_children
+                elem.tag in xpath_elem.children
                 and xpath_elem.xpath + [elem.tag] == current_xpath
             ):
                 skip = False
-                xpath_elem = xpath_elem.field_children[elem.tag]
-                if xpath_elem.field_node_type in [
+                xpath_elem = xpath_elem.children[elem.tag]
+                if xpath_elem.node_type in [
                     ElementType.DICT,
                     ElementType.LIST_OF_DICT,
                 ]:
                     for k, v in elem.attrib.items():
                         if v:
                             attr_tag = etree.QName(k).localname
-                            attr_group = xpath_elem.field_children[
-                                elem.tag + "@attributes"
-                            ]
-                            attribute = attr_group.field_children[attr_tag]
-                            attr_data = xml_to_python(v, attribute.field_node_type)
+
+                            if elem.tag + "@attributes" in xpath_elem.children:
+                                attr_group = xpath_elem.children[
+                                    elem.tag + "@attributes"
+                                ]
+                                attribute = attr_group.children[attr_tag]
+                            else:
+                                attribute = xpath_elem.children[elem.tag + "@" + attr_tag]
+
+                            attr_data = xml_to_python(v, attribute.node_type)
                             if attribute.data_vector is None:
                                 attribute.data_vector = []
                             attribute.data_vector.append(attr_data)
@@ -132,20 +136,21 @@ def parse_xml(xml_file, xpath_root, xpath_list):
         elif event == "end":
             if skip == False:
                 if elem.text:
-                    elem_data = xml_to_python(elem.text, xpath_elem.field_node_type)
+                    elem_data = xml_to_python(elem.text, xpath_elem.node_type)
                     if xpath_elem.data_vector is None:
                         xpath_elem.data_vector = []
                     xpath_elem.data_vector.append(elem_data)
-                xpath_elem = xpath_elem.field_parent
+                xpath_elem = xpath_elem.parent
 
             elem.clear()
             del current_xpath[-1]
             current_level -= 1
 
+    import pprint
+    pprint.pp(xpath_root.get_data())    
+
     if not xpath_list:
-        import pprint
-        pprint.pp(get_data_elem(xpath_root))
-        return 
+        return
 
 
 def open_gzip_file(gzipfile, filename):
@@ -361,31 +366,6 @@ def parse_xml_file(
         xpath_root, xpath_list, flat_attributes, flat_elements
     )
 
-    if xpath_list:
-        parser_levels = len(parser_index)
-        level = 0
-        tracker = []
-        for xpath in xpath_list:
-            tracker.append(xpath)
-            tracker_key = tuple(tracker)
-            level += 1
-            del_list = []
-            for key in parser_index[level]:
-                if key != tracker_key:
-                    del_list.append(key)
-            if del_list:
-                for key in del_list:
-                    del parser_index[level][key]
-
-        for i in range(level + 1, parser_levels):
-            del_list = []
-            for key in parser_index[i]:
-                if key[: len(xpath_list)] != tuple(xpath_list):
-                    del_list.append(key)
-            if del_list:
-                for key in del_list:
-                    del parser_index[i][key]
-
     _logger.info("Parsing " + xml_file)
     _logger.info("Writing to file " + output_file)
 
@@ -476,30 +456,29 @@ def convert_xml(
         fh.setLevel(logging.DEBUG)
         _logger.addHandler(fh)
 
-    _logger.info("Parsing XML Files..")
+    _logger.info("Started processing For XML files..")
 
     if output_path and not os.path.exists(output_path):
         _logger.error("invalid output_path specified")
         sys.exit(1)
 
-    # open xml files
-    file_list = list(
-        set(
-            [
-                f
-                for _files in [
-                    glob.glob(xml_files[x]) for x in range(0, len(xml_files))
-                ]
-                for f in _files
-            ]
-        )
-    )
+    expanded_files = []
+    for pattern in xml_files:
+        matches = glob(pattern)
+        if matches:
+            expanded_files.extend(matches)
+        else:
+            # If no files match the pattern, keep the original string
+            # (useful for letting the application throw a 'File Not Found' error later)
+            expanded_files.append(pattern)
+
+    file_list = list(dict.fromkeys(expanded_files))
     file_count = len(file_list)
 
     if multi > 1:
         parse_queue_pool = Pool(processes=multi)
 
-    _logger.info("Processing " + str(file_count) + " files")
+    _logger.info("Found " + str(file_count) + " total files")
 
     if 1 < len(file_list) <= 1000:
         file_list.sort(key=os.path.getsize, reverse=True)
