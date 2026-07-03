@@ -118,14 +118,10 @@ def parse_xml(xml_file, xpath_root, xpath_list):
                         if v:
                             attr_tag = etree.QName(k).localname
 
-                            if elem.tag + "@attributes" in xpath_elem.children:
-                                attr_group = xpath_elem.children[
-                                    elem.tag + "@attributes"
-                                ]
-                                attribute = attr_group.children[attr_tag]
-                            else:
-                                attribute = xpath_elem.children[elem.tag + "@" + attr_tag]
-
+                            attr_group = xpath_elem.children[
+                                elem.tag + "@attributes"
+                            ]
+                            attribute = attr_group.children[attr_tag]
                             attr_data = xml_to_python(v, attribute.node_type)
                             if attribute.data_vector is None:
                                 attribute.data_vector = []

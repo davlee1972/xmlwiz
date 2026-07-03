@@ -86,8 +86,8 @@ class XmlNode:
 
     def remove_child(self, name):
         if self.children[name].children:
-            for child in self.children[name].children:
-                self.children[name].remove(child)
+            for child_name in list(self.children[name].children):
+                self.children[name].remove_child(child_name)
         del self.children[name]
 
     def find_elem(self, xpath_list):
@@ -110,9 +110,9 @@ class XmlNode:
 
     def get_data(self):
         data = {}
-        data[tuple(self.xpath)] = self.data_vector
-        if self.field_children:
-            for child_elem in self.field_children.values():
+        data[tuple(self.xpath)] = (self.name, self.field_name, self.data_vector)
+        if self.children:
+            for child_elem in self.children.values():
                 child_data = child_elem.get_data()
                 data.update(child_data)
         return data
@@ -124,7 +124,7 @@ class XmlNode:
         self.field_parent = self.parent
         self.field_children = self.children
 
-        for child_elem in self.children.values():
+        for child_elem in list(self.children.values()):
             child_elem.reset_and_trim_fields(xpath_list)
 
         if xpath_list:
@@ -143,29 +143,7 @@ class XmlNode:
 
             # we do not have a match between xpath_list and self.xpath
             if not all(a == b for a, b in zip(xpath_list, self.xpath)):
-                # if this xpath has attributes. remove them.
-                if self.field_name + "@attributes" in self.field_children:
-                    attributes_elem = self.field_children[self.field_name + "@attributes"]
-                    for child_attrib in attributes_elem.children.values():
-                        # clear fields under @attributes
-                        child_attrib.field_name = child_attrib.field_node_type = child_attrib.field_pyarrow_type = (
-                            child_attrib.field_parent
-                        ) = child_attrib.field_children = None
-
-                    # clear @attributes field
-                    attributes_elem.field_name = attributes_elem.field_node_type = attributes_elem.field_pyarrow_type = (
-                        attributes_elem.field_parent
-                    ) = attributes_elem.field_children = None
-                    # clear @attributes field
-
-                # remove this from parent_field.children
-                if self.field_parent:
-                    self.field_parent.field_children = {k: v for k, v in self.field_parent.field_children.items() if k != self.field_name}
-
-                # clear this field
-                self.field_name = self.field_node_type = self.field_pyarrow_type = (
-                    self.field_parent
-                ) = self.field_children = None
+                self.parent.remove_child(self.name)
 
     def flatten_elements(self):
         if not self.name.endswith("@attributes") and len(self.field_children) == 1:
