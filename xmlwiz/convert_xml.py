@@ -45,12 +45,13 @@ from pyarrow.lib import ArrowTypeError
 import xmlschema
 from lxml import etree
 
-from xmlwiz.mappings import ElementType, xpathType, xpathValue
+from xmlwiz.mappings import ElementType 
 
 from xmlwiz.pyarrow_xsd_utils import (
-    convert_xsd_to_xpath_index,
-    convert_xpath_index_to_pyarrow_schema,
+    convert_xsd_to_xpath_tree,
+    convert_xpath_tree_to_pyarrow_schema,
     xml_to_python,
+    get_data_elem,
 )
 
 _logger = logging.getLogger(__name__)
@@ -80,14 +81,12 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml(xml_file, parser_index, xpath_list):
+def parse_xml(xml_file, xpath_root, xpath_list):
 
     current_level = 0
     current_xpath = []
 
-    xpath_elem = parser_index[0][()]
-    xpath_key = []
-    xpath_parent = None
+    xpath_elem = xpath_root
 
     skip = False
 
@@ -97,62 +96,56 @@ def parse_xml(xml_file, parser_index, xpath_list):
             "start",
             "end",
         ),
+        remove_blank_text=True
     )
 
     for event, elem in context:
-        elem.tag = etree.QName(elem.tag).localname
-        current_level += 1
-        current_xpath += [elem.tag]
-
         if event == "start":
+            current_level += 1
+            elem.tag = etree.QName(elem.tag).localname
+            current_xpath.append(elem.tag)
+
             if (
-                elem.tag in xpath_elem[xpathType.CHILDREN]
-                and xpath_key + [elem.tag] == current_xpath
+                elem.tag in xpath_elem.field_children
+                and xpath_elem.xpath + [elem.tag] == current_xpath
             ):
                 skip = False
-                xpath_key += [elem.tag]
-                xpath_parent = xpath_elem
-                xpath_elem = xpath_elem[xpathType.CHILDREN][elem.tag]
-                if xpath_elem[xpathType.ELEMENT_TYPE] in [
+                xpath_elem = xpath_elem.field_children[elem.tag]
+                if xpath_elem.field_node_type in [
                     ElementType.DICT,
                     ElementType.LIST_OF_DICT,
                 ]:
                     for k, v in elem.attrib.items():
-                        attr_tag = etree.QName(k).localname
-                        attr_group = xpath_elem[xpathType.CHILDREN][
-                            elem.tag + "@attributes"
-                        ]
-                        attribute = attr_group[xpathType.CHILDREN][attr_tag]
-                        attr_data = xml_to_python(v, attribute[xpathType.ELEMENT_TYPE])
-                        if attribute[xpathType.VALUE][xpathValue.VECTOR] is None:
-                            attribute[xpathType.VALUE][xpathValue.VECTOR] = []
-                        attribute[xpathType.VALUE][xpathValue.VECTOR].append(attr_data)
+                        if v:
+                            attr_tag = etree.QName(k).localname
+                            attr_group = xpath_elem.field_children[
+                                elem.tag + "@attributes"
+                            ]
+                            attribute = attr_group.field_children[attr_tag]
+                            attr_data = xml_to_python(v, attribute.field_node_type)
+                            if attribute.data_vector is None:
+                                attribute.data_vector = []
+                            attribute.data_vector.append(attr_data)
             else:
                 skip = True
 
         elif event == "end":
-            elem.tag = etree.QName(elem.tag).localname
             if skip == False:
-                elem.tag = etree.QName(elem.tag).localname
-                elem_data = xml_to_python(elem.text, xpath_elem[xpathType.ELEMENT_TYPE])
-                if xpath_elem[xpathType.VALUE][xpathValue.VECTOR] is None:
-                    xpath_elem[xpathType.VALUE][xpathValue.VECTOR] = []
-                xpath_elem[xpathType.VALUE][xpathValue.VECTOR].append(elem_data)
-                xpath_elem = xpath_elem[xpathType.PARENT]
-                del xpath_key[-1]
+                if elem.text:
+                    elem_data = xml_to_python(elem.text, xpath_elem.field_node_type)
+                    if xpath_elem.data_vector is None:
+                        xpath_elem.data_vector = []
+                    xpath_elem.data_vector.append(elem_data)
+                xpath_elem = xpath_elem.field_parent
 
             elem.clear()
-            current_level -= 1
             del current_xpath[-1]
+            current_level -= 1
 
     if not xpath_list:
-        for level in parser_index:
-            for k, v in parser_index[level].items():
-                print("==============")
-                print(level)
-                print(k)
-                print(v[xpathType.VALUE][xpathValue.VECTOR])
-        yield parser_index[0][()][xpathType.VALUE][xpathValue.VECTOR]
+        import pprint
+        pprint.pp(get_data_elem(xpath_root))
+        return 
 
 
 def open_gzip_file(gzipfile, filename):
@@ -354,51 +347,19 @@ def parse_xml_file(
     """
 
     processed = False
+
     xml_schema = xmlschema.XMLSchema11(xsd_file)
 
-    xpath_index = convert_xsd_to_xpath_index(xml_schema, max_recursion)
+    xpath_root = convert_xsd_to_xpath_tree(xml_schema, max_recursion)
 
     xpath_list = None
     if xml_path:
         xpath_list = xml_path.split("/")
         xpath_list = xpath_list[1:]
 
-    pyarrow_schema = convert_xpath_index_to_pyarrow_schema(
-        xpath_index, xpath_list, flat_attributes, flat_elements
+    pyarrow_schema = convert_xpath_tree_to_pyarrow_schema(
+        xpath_root, xpath_list, flat_attributes, flat_elements
     )
-
-    print("zzz")
-    print(xpath_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.NAME])
-    print(xpath_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.CHILDREN].keys())
-    print(
-        xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT][
-            xpathType.NAME
-        ]
-    )
-    print(
-        xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT]
-        == xpath_index[2][tuple(["purchaseOrder", "shipTo"])]
-    )
-    print(
-        xpath_index[3][tuple(["purchaseOrder", "shipTo", "name"])][xpathType.PARENT][
-            xpathType.CHILDREN
-        ].keys()
-    )
-    print("zzz")
-
-    parser_index = xpath_index.copy()
-
-    parser_index = {}
-    for level in xpath_index:
-        parser_index[level] = {}
-        for k, v in xpath_index[level].items():
-            parser_index[level][k] = v
-
-    print("zzz")
-    print(
-        parser_index[2][tuple(["purchaseOrder", "shipTo"])][xpathType.CHILDREN].keys()
-    )
-    print("zzz")
 
     if xpath_list:
         parser_levels = len(parser_index)
@@ -433,7 +394,7 @@ def parse_xml_file(
             output_file,
             gzipfile,
             xml_file,
-            parser_index,
+            xpath_root,
             xpath_list,
             pyarrow_schema,
             processed,
@@ -445,7 +406,7 @@ def parse_xml_file(
         processed = write_parquet(
             output_file,
             xml_file,
-            parser_index,
+            xpath_root,
             xpath_list,
             pyarrow_schema,
             processed,

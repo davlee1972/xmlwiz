@@ -30,8 +30,6 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from xmlwiz.mappings import (
-    xpathType,
-    xpathValue,
     ElementType,
     XSD_TO_PYARROW,
     XSD_TO_ELEMENT_DECODE,
@@ -403,11 +401,12 @@ def convert_xsd_elem(elem, xpath_elem, xpath, max_recursion, recursion_check_lis
         if elem.type.has_complex_content() or elem.type.has_mixed_content():
             child_counter = 0
             for child_elem in elem.type.content.iter_elements():
-                if child_elem.type.name:
+                old_recursion_check_list = recursion_check_list
+                if child_elem.type.is_complex() and child_elem.type.name:
                     # add element type name to recursion counter in case child elements come up more than twice (by default).
-                    recursion_check_list.append(child_elem.type.name)
-
+                    recursion_check_list  = recursion_check_list + [child_elem.type.name]
                     if recursion_check_list.count(child_elem.type.name) > max_recursion:
+                        recursion_check_list = old_recursion_check_list
                         continue
                 child_counter += 1
 
@@ -418,6 +417,8 @@ def convert_xsd_elem(elem, xpath_elem, xpath, max_recursion, recursion_check_lis
                     max_recursion,
                     recursion_check_list,
                 )
+
+                recursion_check_list = old_recursion_check_list
 
             if elem.type.has_complex_content() and child_counter == 0:
                 xpath_elem.remove_child(elem.local_name)
@@ -466,6 +467,15 @@ def find_field_elem(xpath_elem: XmlNode, xpath_list):
             elem_found = find_field_elem(child_elem, xpath_list)
             if elem_found:
                 return elem_found
+
+def get_data_elem(xpath_elem: XmlNode):
+    data = {}
+    data[tuple(xpath_elem.xpath)] = xpath_elem.data_vector
+    if xpath_elem.field_children:
+        for child_elem in xpath_elem.field_children.values():
+            child_data = get_data_elem(child_elem)
+            data.update(child_data)
+    return data
 
 
 def convert_xpath_tree_to_pyarrow_schema(
