@@ -26,23 +26,60 @@ import pyarrow as pa
 
 
 class ElementType(IntEnum):
+    SIMPLE = 1
+    # Simple types.
+    LIST = 2
+    # Complex item with simple content and no attributes and max_occurs > 1.
+    DICT = 3
+    # Complex item with simple content and attributes and max_occurs = 1.
+    # Complex item with complex or mixed content and max_occurs = 1.
+    LIST_OF_DICT = 4
+    # Complex item with simple content and attributes and max_occurs > 1.
+    # Complex item with complex or mixed content and max_occurs > 1.
+
+
+# compute expressions for element text to pyarrow
+# temporary enum will be replaced with a class that contains pyarrow.compute.Expression(s)
+class ComputeType(IntEnum):
     LIST = 1
-    # Only used when flattening content with no attributes and a single element.
-    # with max_occurs > 0.
-    DICT = 2
-    # content without max_occurs > 0.
-    # or flattened content with no attributes and a single element.
-    LIST_OF_DICT = 3
-    # content with max_occurs > 0.
-    DECIMAL = 4
-    DURATION = 5
-    DATE = 6
-    TIMESTAMP = 7
-    TIME = 8
-    GEGORIAN = 9
-    OTHER = 10
+    DECIMAL = 2
+    DURATION = 3
+    DATE = 4
+    TIMESTAMP = 5
+    TIME = 6
+    GEGORIAN = 7
+    LESS = 8
+    LESS_EQUAL = 9
+    GREATER = 10
+    GREATER_EQUAL = 11
+    UTF8_TRIM_WHITESPACE = 12
+    REPLACE_SUBSTRING_REGEX = 13
 
 
+# used to convert element text to pyarrow types
+# this is needed if pyarrow cannot cast string values directly to pyarrow types
+XSD_TO_COMPUTE_DECODE = {
+    "date": ComputeType.DATE,
+    "time": ComputeType.TIME,
+    "dateTime": ComputeType.TIMESTAMP,
+    "duration": ComputeType.DURATION,
+    "gYearMonth": ComputeType.GEGORIAN,
+    "gYear": ComputeType.GEGORIAN,
+    "gMonthDay": ComputeType.GEGORIAN,
+    "gDay": ComputeType.GEGORIAN,
+    "gMonth": ComputeType.GEGORIAN,
+}
+
+FACET_TO_COMPUTE_DECODE = {
+    "maxExclusive": ComputeType.LESS,
+    "maxInclusive": ComputeType.LESS_EQUAL,
+    "minExclusive": ComputeType.GREATER,
+    "minInclusive": ComputeType.GREATER_EQUAL,
+    "whitespace|collapse": ComputeType.UTF8_TRIM_WHITESPACE,
+    "whitespace|replace": ComputeType.REPLACE_SUBSTRING_REGEX,
+}
+
+# pyarrow type for gegorian periods
 gegorianPeriod = pa.struct(
     [
         pa.field("yyyy", pa.int16(), nullable=True),
@@ -99,19 +136,4 @@ XSD_TO_PYARROW = {
     "gMonthDay": gegorianPeriod,
     "gDay": gegorianPeriod,
     "gMonth": gegorianPeriod,
-}
-
-# used to convert element text to python types
-# this is needed if pyarrow cannot cast string values directly to pyarrow types
-XSD_TO_ELEMENT_DECODE = {
-    "decimal": ElementType.DECIMAL,
-    "date": ElementType.DATE,
-    "time": ElementType.TIME,
-    "dateTime": ElementType.TIMESTAMP,
-    "duration": ElementType.DURATION,
-    "gYearMonth": ElementType.GEGORIAN,
-    "gYear": ElementType.GEGORIAN,
-    "gMonthDay": ElementType.GEGORIAN,
-    "gDay": ElementType.GEGORIAN,
-    "gMonth": ElementType.GEGORIAN,
 }
