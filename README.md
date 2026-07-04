@@ -33,7 +33,7 @@ XML Wizard positional arguments: xml_files | xml files to convert
 | -h, --help | show this help message and exit |
 | -x XSD_FILE, --xsd_file XSD_FILE | xsd file location. |
 | --max_recursion MAX_RECURSION | max recursions for self referencing elements. |
-| -p XPATH, --xpath XPATH | xpath to parse. |
+| -p XML_PATH, --xml_path XML_PATH | xml path to parse. |
 | --rows_per_batch ROWS_PER_BATCH |  number of rows to write per batch when using xpath. |
 | -m MULTI, --multi MULTI | number of parsers. default is 1. |
 | -o OUTPUT_FORMAT, --output_format OUTPUT_FORMAT | output format `json`, `jsonl` or `parquet`. default is jsonl. |
