@@ -56,8 +56,10 @@ class XmlNode:
     field_children: dict[str, XmlNode] = field(default_factory=dict, repr=False)
 
     data_vector: list[str] = field(default_factory=list)
-    data_offset: list[int | None] = field(default_factory=list)
+    data_offsets: list[int | None] = field(default_factory=lambda: [0])
     data_counter: int = 0
+    data_pyarrow: pa.Array = None
+
 
     def add_child(
         self,
@@ -92,6 +94,11 @@ class XmlNode:
     def iter_elem(self):
         yield self
         for child_elem in self.children.values():
+            yield from child_elem.iter_elem()
+
+    def iter_field_elem(self):
+        yield self
+        for child_elem in self.field_children.values():
             yield from child_elem.iter_elem()
 
     def find_elem(self, xml_path):
