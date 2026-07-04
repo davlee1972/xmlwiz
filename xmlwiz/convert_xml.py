@@ -199,14 +199,7 @@ def parse_xml(xml_file, xpath_root, xpath_list):
                         xpath_elem.data_counter += missing_rows
                 xpath_elem.data_pyarrow = pa.array(xpath_elem.data_vector)
 
-    import pprint
-
-    pprint.pp(xpath_root.data_pyarrow.to_pylist())    
-
-    sys.exit()
-    
-    if not xpath_list:
-        return
+    return
 
 
 def open_gzip_file(gzipfile, filename):
