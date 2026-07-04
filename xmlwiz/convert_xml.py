@@ -117,19 +117,20 @@ def parse_xml(xml_file, xpath_root, xpath_list):
                     ElementType.DICT,
                     ElementType.LIST_OF_DICT,
                 ]:
-
                     if elem.attrib:
                         attr_group = xpath_elem.children[
                             elem.tag + "@attributes"
                         ]
+                        attr_group.data_counter += 1
                         for attr_tag, attr_text in elem.attrib.items():
                             attr_tag = etree.QName(attr_tag).localname
 
                             attribute = attr_group.children[attr_tag]
                             attribute.data_counter += 1
-                            missing_rows = xpath_elem.data_counter - attribute.data_counter
+                            missing_rows = attr_group.data_counter - attribute.data_counter 
                             if missing_rows > 0:
                                 attribute.data_vector.extend([None] * missing_rows)
+                                attribute.data_counter += missing_rows
                             # attr_data = xml_to_python(v, attribute.node_type)
                             attribute.data_vector.append(attr_text)
             else:
@@ -146,6 +147,13 @@ def parse_xml(xml_file, xpath_root, xpath_list):
                 ]:
                 """
 
+                # add offsets to track how many child rows belong to this list
+                if xpath_elem.children:
+                    for child_elem in xpath_elem.children.values():
+                        if child_elem.node_type == ElementType.LIST_OF_DICT or (isinstance(child_elem.node_type, tuple) and child_elem.node_type[0] == ElementType.LIST):
+                            child_elem.data_offsets.append(child_elem.data_counter)
+
+                # fill column with nulls to match number of existing rows before adding new value to column
                 if xpath_elem.parent.node_type in [
                     ElementType.DICT,
                     ElementType.LIST_OF_DICT,
@@ -153,6 +161,7 @@ def parse_xml(xml_file, xpath_root, xpath_list):
                     missing_rows = xpath_elem.parent.data_counter - xpath_elem.data_counter + 1
                     if missing_rows > 0:
                         xpath_elem.data_vector.extend([None] * missing_rows)
+                        xpath_elem.data_counter += missing_rows
 
                 #elem_data = xml_to_python(elem.text, xpath_elem.node_type)
                 xpath_elem.data_vector.append(elem.text)
@@ -162,11 +171,35 @@ def parse_xml(xml_file, xpath_root, xpath_list):
             del current_xpath[-1]
             current_level -= 1
 
-    import pprint
-    pprint.pp(xpath_root.get_data())    
-    
-    if not xpath_list:
-        return
+    xpath_root.data_counter = 1
+    for xpath_elem in reversed(list(xpath_root.iter_elem())):
+        if xpath_elem.data_counter:
+            if xpath_elem.node_type in [ElementType.DICT, ElementType.LIST_OF_DICT]:
+                data = {k: v.data_pyarrow for k, v in xpath_elem.children.items() if v.data_pyarrow}
+                if data:
+                    data = pa.StructArray.from_arrays(
+                        arrays=data.values(),
+                        names=data.keys()
+                    )
+                    if xpath_elem.node_type == ElementType.LIST_OF_DICT:
+                        xpath_elem.data_pyarrow = pa.ListArray.from_arrays(xpath_elem.data_offsets, data)
+                    else:
+                        xpath_elem.data_pyarrow = data
+            elif isinstance(xpath_elem.node_type, tuple) and xpath_elem.node_type[0] == ElementType.LIST:
+                if xpath_elem.data_vector:
+                    xpath_elem.data_pyarrow = pa.ListArray.from_arrays(xpath_elem.data_offsets, xpath_elem.data_vector)
+            elif xpath_elem.data_vector:
+                if xpath_elem.parent and xpath_elem.parent.node_type in [
+                    ElementType.DICT,
+                    ElementType.LIST_OF_DICT,
+                ]:
+                    missing_rows = xpath_elem.parent.data_counter - xpath_elem.data_counter
+                    if missing_rows > 0:
+                        xpath_elem.data_vector.extend([None] * missing_rows)
+                        xpath_elem.data_counter += missing_rows
+                xpath_elem.data_pyarrow = pa.array(xpath_elem.data_vector)
+
+    return
 
 
 def open_gzip_file(gzipfile, filename):
