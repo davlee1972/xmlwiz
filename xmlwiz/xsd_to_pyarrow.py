@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-import isodate
 from decimal import Decimal
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -56,9 +55,9 @@ class XmlNode:
     field_parent: XmlNode | None = (field(default=None, repr=False),)
     field_children: dict[str, XmlNode] = field(default_factory=dict, repr=False)
 
-    data_vector: list[str | None] | None = None
-    data_offset: list[int | None] = None
-    data_counter: int | None = None
+    data_vector: list[str] = field(default_factory=list)
+    data_offset: list[int | None] = field(default_factory=list)
+    data_counter: int = 0
 
     def add_child(
         self,
@@ -90,31 +89,27 @@ class XmlNode:
                 self.children[name].remove_child(child_name)
         del self.children[name]
 
-    def find_elem(self, xpath_list):
-        if self.xpath == xpath_list:
-            return self
-        elif self.children:
-            for child_elem in self.children.values():
-                elem_found = child_elem.find_elem(xpath_list)
-                if elem_found:
-                    return elem_found
+    def iter_elem(self):
+        yield self
+        for child_elem in self.children.values():
+            yield from child_elem.iter_elem()
 
-    def find_field_elem(self, xpath_list):
-        if self.xpath == xpath_list:
-            return self
-        elif self.field_children:
-            for child_elem in self.field_children.values():
-                elem_found = child_elem.find_field_elem(xpath_list)
-                if elem_found:
-                    return elem_found
+    def find_elem(self, xml_path):
+
+        if isinstance(xml_path, str):
+            xpath_list = xml_path.split("/")
+            xpath_list = xpath_list[1:]
+        else:
+            xpath_list = xml_path
+
+        for xpath_elem in self.iter_elem():
+            if xpath_elem.xpath == xpath_list:
+                return xpath_elem
 
     def get_data(self):
         data = {}
-        data[tuple(self.xpath)] = (self.name, self.field_name, self.data_vector)
-        if self.children:
-            for child_elem in self.children.values():
-                child_data = child_elem.get_data()
-                data.update(child_data)
+        for xpath_elem in self.iter_elem():
+            data[tuple(xpath_elem.xpath)] = xpath_elem.data_vector
         return data
 
     def reset_and_trim_fields(self, xpath_list=None):
@@ -231,70 +226,6 @@ class XmlNode:
                 self.field_pyarrow_type,
                 self.nullable,
             )
-
-
-def xml_to_python(elem_text, element_type):
-    # handles decoding element text to python data
-
-    if isinstance(element_type, tuple) and element_type[0] == ElementType.LIST:
-        elem_list = elem_text.split(" ")
-        elem_list = [
-            element_element_type(elem_item, element_type[1]) for elem_item in elem_list
-        ]
-        return elem_list
-    elif element_type == ElementType.DECIMAL:
-        return Decimal(elem_text)
-    elif element_type == ElementType.DURATION:
-        dur = isodate.parse_duration(elem_text)
-        microseconds = int(dur.total_seconds() * 1_000_000)
-        return microseconds
-    elif element_type == ElementType.DATE:
-        return datetime.fromisoformat(elem_text).date()
-    elif element_type == ElementType.TIMESTAMP:
-        return datetime.fromisoformat(elem_text)
-    elif element_type == ElementType.TIME:
-        return datetime.strptime(elem_text, "%H:%M:%S %z").time()
-    elif element_type == ElementType.GEGORIAN:
-        date_parts = elem_text.split("-")
-        date_len = len(date_parts)
-        """
-            <gYearMonthType>2026-06</gYear MonthType> <gYearType>2026</gYearType>
-            <gMonthDayType>--06-23</gMonthDayType>
-            <gDayType>---23</gDayType>
-            <gMonthType>--86</gMonthType>
-        """
-        if date_len == 1:
-            return {"yyyy": int(date_parts[0])}
-        elif date_len == 2:
-            return {"yyyy": int(date_parts[0]), "mm": int(date_parts[1])}
-        elif date_len == 3:
-            return {"mm": int(date_parts[2])}
-        elif date_len == 4:
-            if date_parts[2]:
-                return {"mm": int(date_parts[2]), "dd": int(date_parts[3])}
-            else:
-                return {"dd": int(date_parts[3])}
-        return datetime.strptime(elem_text, "%H:%M:%S %z").time()
-    else:
-        return elem_text
-
-
-def apply_facet(facet_name, vector, value):
-    # Signed Integers
-    if facet_name == "maxExclusive":
-        return pc.less(vector, value)
-    elif facet_name == "maxInclusive":
-        return pc.less_equal, (vector, value)
-    elif facet_name == "minExclusive":
-        return pc.greater(vector, value)
-    elif facet_name == "minInclusive":
-        return pc.greater_equal, (vector, value)
-    elif facet_name == "whitespace" and value == "collapse":
-        return pc.replace_substring_regex(
-            pc.utf8_trim_whitespace(vector), pattern=r"\s+", replacement=""
-        )
-    elif facet_name == "whitespace" and value == "replace":
-        return pc.replace_substring_regex(vector, pattern=r"\s", replacement="")
 
 
 def pyarrow_numeric(xsd_type):
@@ -589,36 +520,6 @@ def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
             child_elem.nullable = True
 
     return xpath_root
-
-
-def find_elem(xpath_elem: XmlNode, xpath_list):
-    if xpath_elem.xpath == xpath_list:
-        return xpath_elem
-    elif xpath_elem.children:
-        for child_elem in xpath_elem.children.values():
-            elem_found = find_elem(child_elem, xpath_list)
-            if elem_found:
-                return elem_found
-
-
-def find_field_elem(xpath_elem: XmlNode, xpath_list):
-    if xpath_elem.xpath == xpath_list:
-        return xpath_elem
-    elif xpath_elem.field_children:
-        for child_elem in xpath_elem.field_children.values():
-            elem_found = find_field_elem(child_elem, xpath_list)
-            if elem_found:
-                return elem_found
-
-
-def get_data_elem(xpath_elem: XmlNode):
-    data = {}
-    data[tuple(xpath_elem.xpath)] = xpath_elem.data_vector
-    if xpath_elem.field_children:
-        for child_elem in xpath_elem.field_children.values():
-            child_data = get_data_elem(child_elem)
-            data.update(child_data)
-    return data
 
 
 def convert_xpath_tree_to_pyarrow_schema(

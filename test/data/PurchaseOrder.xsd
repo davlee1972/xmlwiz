@@ -18,6 +18,7 @@
    <xs:element name="items"  type="Items"/>
   </xs:sequence>
   <xs:attribute name="orderDate" type="xs:date"/>
+  <xs:attribute name="deliveryDate" type="xs:date"/>  
  </xs:complexType>
 
  <xs:complexType name="USAddress">

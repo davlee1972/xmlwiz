@@ -5,7 +5,7 @@
 <!-- python xml_wiz.py -o parquet -t . -x .\test\data\PurchaseOrder.xsd .\test\data\PurchaseOrder.xml -->
 
 
-<purchaseOrder orderDate="1999-10-20">
+<purchaseOrder orderDate="1999-10-20" deliveryDate="1999-10-25">
     <shipTo country="US">
         <name>Alice Smith</name>
         <street>123 Maple Street</street>
