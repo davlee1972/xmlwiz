@@ -30,56 +30,55 @@ import pyarrow.compute as pc
 
 from xmlwiz.mappings import (
     ElementType,
+    ComputeType,
     XSD_TO_PYARROW,
-    XSD_TO_ELEMENT_DECODE,
+    XSD_TO_COMPUTE_DECODE,
 )
 
 
 @dataclass(slots=True)
-class XmlNode:
+class XmlElement:
     name: str
-    level: int
-    xpath: list
-    node_type: int
-    parent: XmlNode | None = field(repr=False)
-    pyarrow_type: pa.DataType
-    nullable: bool
-    casting_exp: pc.Expression | None
-    validation_exp: pc.Expression | None
+    xpaths: list
+    element_type: int
+    pyarrow_type: pa.DataType | None
+    nullable: bool | None
+    casting_exp: list[pc.Expression] | None
+    validation_exp: list[pc.Expression] | None
 
-    children: dict[str, XmlNode] = field(default_factory=dict, repr=False)
+    parent: XmlElement | None = field(repr=False)
+    children: dict[str, XmlElement] = field(default_factory=dict, repr=False)
 
     field_name: str | None = None
-    field_node_type: int | None = None
+    field_element_type: int | None = None
     field_pyarrow_type: pa.DataType | None = (field(default=None, repr=False),)
-    field_parent: XmlNode | None = (field(default=None, repr=False),)
-    field_children: dict[str, XmlNode] = field(default_factory=dict, repr=False)
+    field_parent: XmlElement | None = (field(default=None, repr=False),)
+    field_children: dict[str, XmlElement] = field(default_factory=dict, repr=False)
 
     data_vector: list[str] = field(default_factory=list)
     data_offsets: list[int | None] = field(default_factory=lambda: [0])
     data_counter: int = 0
     data_pyarrow: pa.Array = None
 
-
     def add_child(
         self,
         name,
-        node_type,
+        element_type,
         pyarrow_type,
         nullable,
         casting_exp,
         validation_exp,
-    ) -> XmlNode:
-        new_child = XmlNode(
+    ) -> XmlElement:
+
+        new_child = XmlElement(
             name,
-            self.level + 1,
-            self.xpath + [name],
-            node_type,
-            self,
+            self.xpaths + [name],
+            element_type,
             pyarrow_type,
             nullable,
             casting_exp,
             validation_exp,
+            self,
         )
 
         self.children[name] = new_child
@@ -104,47 +103,51 @@ class XmlNode:
     def find_elem(self, xml_path):
 
         if isinstance(xml_path, str):
-            xpath_list = xml_path.split("/")
-            xpath_list = xpath_list[1:]
+            xpaths = xml_path.split("/")
+            xpaths = xpaths[1:]
         else:
-            xpath_list = xml_path
+            xpaths = xml_path
 
         for xpath_elem in self.iter_elem():
-            if xpath_elem.xpath == xpath_list:
+            if xpath_elem.xpaths == xpaths:
                 return xpath_elem
 
     def get_data(self):
         data = {}
         for xpath_elem in self.iter_elem():
-            data[tuple(xpath_elem.xpath)] = xpath_elem.data_vector
+            data[tuple(xpath_elem.xpaths)] = xpath_elem.data_vector
         return data
 
-    def reset_and_trim_fields(self, xpath_list=None):
+    def reset_and_trim_fields(self, xpaths=None):
         self.field_name = self.name
-        self.field_node_type = self.node_type
+        self.field_element_type = self.element_type
         self.field_pyarrow_type = self.pyarrow_type
         self.field_parent = self.parent
         self.field_children = self.children
 
         for child_elem in list(self.children.values()):
-            child_elem.reset_and_trim_fields(xpath_list)
+            child_elem.reset_and_trim_fields(xpaths)
 
-        if xpath_list:
-            # attributes trimming is handled by parent
+        if xpaths:
+            # attributes nad tail trimming is handled by removing parent element
             try:
-                if self.xpath[-1].endswith("@attributes"):
+                if self.xpaths[-1].endswith("@attributes") or self.xpaths[-1].endswith(
+                    "@tail"
+                ):
                     return
             except:
                 pass
 
             try:
-                if self.field_parent.xpath[-1].endswith("@attributes"):
+                if self.field_parent.xpaths[-1].endswith(
+                    "@attributes"
+                ) or self.field_parent.xpaths[-1].endswith("@attributes"):
                     return
             except:
                 pass
 
-            # we do not have a match between xpath_list and self.xpath
-            if not all(a == b for a, b in zip(xpath_list, self.xpath)):
+            # we do not have a match between xpaths and self.xpaths
+            if not all(a == b for a, b in zip(xpaths, self.xpaths)):
                 self.parent.remove_child(self.name)
 
     def flatten_elements(self):
@@ -152,12 +155,12 @@ class XmlNode:
             child, child_elem = next(iter(self.field_children.items()))
             # move all child child items up a level
             self.field_children = child_elem.field_children
-            self.field_node_type = child_elem.field_node_type
+            self.field_element_type = child_elem.field_element_type
             # change parent to this self
             for child_elem2 in self.field_children.values():
                 child_elem2.field_parent = self
             # clear out child
-            child_elem.field_name = child_elem.field_node_type = (
+            child_elem.field_name = child_elem.field_element_type = (
                 child_elem.field_pyarrow_type
             ) = child_elem.field_parent = child_elem.field_children = None
 
@@ -185,7 +188,7 @@ class XmlNode:
                         )
                 else:
                     self.field_parent.field_children[child] = child_elem
-            self.field_name = self.field_node_type = self.field_pyarrow_type = (
+            self.field_name = self.field_element_type = self.field_pyarrow_type = (
                 self.field_parent
             ) = self.field_children = None
         else:
@@ -195,10 +198,7 @@ class XmlNode:
     # convert xpath element to pyarrow type
     def set_pyarrow_type(self):
 
-        if (
-            isinstance(self.field_node_type, tuple)
-            and self.field_node_type[0] == ElementType.LIST
-        ):
+        if self.field_element_type == ElementType.LIST:
             self.field_pyarrow_type = pa.list_(self.field_pyarrow_type)
             return (
                 self.field_name,
@@ -206,21 +206,21 @@ class XmlNode:
                 self.nullable,
             )
 
-        elif self.field_node_type in [ElementType.DICT, ElementType.LIST_OF_DICT]:
+        elif self.field_element_type in [ElementType.DICT, ElementType.LIST_OF_DICT]:
             struct_fields = []
             for child_elem in self.field_children.values():
                 struct_fields.append(child_elem.set_pyarrow_type())
 
             struct_type = pa.struct(struct_fields)
 
-            if self.field_node_type == ElementType.DICT:
+            if self.field_element_type == ElementType.DICT:
                 self.field_pyarrow_type = struct_type
                 return (
                     self.field_name,
                     self.field_pyarrow_type,
                     self.nullable,
                 )
-            elif self.field_node_type == ElementType.LIST_OF_DICT:
+            elif self.field_element_type == ElementType.LIST_OF_DICT:
                 self.field_pyarrow_type = pa.list_(struct_type)
                 return (
                     self.field_name,
@@ -329,11 +329,15 @@ def pyarrow_numeric(xsd_type):
         return pa.int64()
 
 
-def map_xsd_type_to_arrow(xsd_type):
+def map_xsd_simple_type_to_arrow(xsd_type):
     # returns
-    # element_type - python Logic to transform element text to python type
     # pyarrow_type pyarrow type to transform from element text or python type
-    # validation_rule - pyarrow compute expression to validate vectors
+    # casting exp - pyarrow compute expressions to cast string to pyarrow types
+    # validation exp - pyarrow compute expressions to validate vectors
+
+    casting_exp = []
+    validation_exp = []
+
     if xsd_type.is_restriction():
         local_name = xsd_type.base_type.local_name
         base_type = xsd_type.base_type
@@ -343,44 +347,41 @@ def map_xsd_type_to_arrow(xsd_type):
 
     if base_type.is_list():
         local_name = base_type.item_type.local_name
-        element_type = XSD_TO_ELEMENT_DECODE.get(local_name, ElementType.OTHER)
-        pyarrow_type = XSD_TO_PYARROW.get(local_name, pa.string())
-        if pyarrow_type == "numeric":
-            pyarrow_type = pyarrow_numeric(xsd_type)
-        pyarrow_validation = None
-        return (
-            (ElementType.LIST, element_type),
-            pa.list_(pyarrow_type),
-            pyarrow_validation,
-        )
-    else:
-        element_type = XSD_TO_ELEMENT_DECODE.get(local_name, ElementType.OTHER)
-        pyarrow_type = XSD_TO_PYARROW.get(local_name, pa.string())
-        if pyarrow_type == "numeric":
-            pyarrow_type = pyarrow_numeric(xsd_type)
-        pyarrow_validation = None
-        return element_type, pyarrow_type, pyarrow_validation
+        casting_exp.append(ComputeType.LIST)
+
+    compute_type = XSD_TO_COMPUTE_DECODE.get(local_name, None)
+    if compute_type:
+        casting_exp.append(compute_type)
+
+    pyarrow_type = XSD_TO_PYARROW.get(local_name, pa.string())
+    if pyarrow_type == "numeric":
+        pyarrow_type = pyarrow_numeric(xsd_type)
+        if isinstance(pyarrow_type, pa.FixedSizeBinaryType):
+            casting_exp.append(ComputeType.DECIMAL)
+
+    return (
+        pyarrow_type,
+        casting_exp,
+        validation_exp,
+    )
 
 
-def convert_xsd_elem(elem, xpath_elem, xpath, max_recursion, recursion_check_list):
+def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
 
-    xpath += [elem.local_name]
-    level = len(xpath)
     nullable = elem.min_occurs == 0
 
-    pyarrow_casting = None
-
     if elem.type.is_simple():
-        element_type, pyarrow_type, pyarrow_validation = map_xsd_type_to_arrow(
+        pyarrow_type, casting_exp, validation_exp = map_xsd_simple_type_to_arrow(
             elem.type
         )
+
         xpath_elem.add_child(
             elem.local_name,
-            element_type,
+            ElementType.SIMPLE,
             pyarrow_type,
             nullable,
-            pyarrow_casting,
-            pyarrow_validation,
+            casting_exp,
+            validation_exp,
         )
     else:
         # 1. Process Attributes
@@ -388,45 +389,63 @@ def convert_xsd_elem(elem, xpath_elem, xpath, max_recursion, recursion_check_lis
         if hasattr(elem.type, "attributes"):
             attributes_nullable = True
             for attr in elem.type.attributes.values():
-                attr_xpath = xpath + [elem.local_name + "@attributes", attr.name]
-                element_type, pyarrow_type, pyarrow_validation = map_xsd_type_to_arrow(
-                    attr.type
+                pyarrow_type, casting_exp, validation_exp = (
+                    map_xsd_simple_type_to_arrow(attr.type)
                 )
                 attr_nullable = attr.use == "optional"
                 if not attr_nullable:
                     attributes_nullable = False
 
                 attr_fields[attr.name] = (
-                    element_type,
                     pyarrow_type,
                     attr_nullable,
-                    pyarrow_casting,
-                    pyarrow_validation,
+                    casting_exp,
+                    validation_exp,
                 )
 
         # 2. Process Simple Content
         if elem.type.has_simple_content():
-            element_type, pyarrow_type, pyarrow_validation = map_xsd_type_to_arrow(
+            pyarrow_type, casting_exp, validation_exp = map_xsd_simple_type_to_arrow(
                 elem.type
             )
-            if elem.max_occurs is None or elem.max_occurs > 1:
-                parent_xpath_elem = xpath_elem.add_child(
-                    elem.local_name,
-                    (ElementType.LIST, element_type),
-                    pyarrow_type,
-                    nullable,
-                    pyarrow_casting,
-                    pyarrow_validation,
-                )
+            if attr_fields:
+                if elem.max_occurs is None or elem.max_occurs > 1:
+                    parent_xpath_elem = xpath_elem.add_child(
+                        elem.local_name,
+                        ElementType.LIST_OF_DICT,
+                        pyarrow_type,
+                        nullable,
+                        casting_exp,
+                        validation_exp,
+                    )
+                else:
+                    parent_xpath_elem = xpath_elem.add_child(
+                        elem.local_name,
+                        ElementType.DICT,
+                        pyarrow_type,
+                        nullable,
+                        casting_exp,
+                        validation_exp,
+                    )
             else:
-                parent_xpath_elem = xpath_elem.add_child(
-                    elem.local_name,
-                    element_type,
-                    pyarrow_type,
-                    nullable,
-                    pyarrow_casting,
-                    pyarrow_validation,
-                )
+                if elem.max_occurs is None or elem.max_occurs > 1:
+                    parent_xpath_elem = xpath_elem.add_child(
+                        elem.local_name,
+                        ElementType.LIST,
+                        pyarrow_type,
+                        nullable,
+                        casting_exp,
+                        validation_exp,
+                    )
+                else:
+                    parent_xpath_elem = xpath_elem.add_child(
+                        elem.local_name,
+                        ElementType.SIMPLE,
+                        pyarrow_type,
+                        nullable,
+                        casting_exp,
+                        validation_exp,
+                    )
 
         # 3. Process Mixed and Complex Content
         elif elem.type.has_complex_content() or elem.type.has_mixed_content():
@@ -449,19 +468,6 @@ def convert_xsd_elem(elem, xpath_elem, xpath, max_recursion, recursion_check_lis
                     None,
                 )
 
-            if elem.type.has_mixed_content():
-                element_type, pyarrow_type, pyarrow_validation = map_xsd_type_to_arrow(
-                    elem.type
-                )
-                parent_xpath_elem.add_child(
-                    elem.local_name,
-                    element_type,
-                    pyarrow_type,
-                    nullable,
-                    pyarrow_casting,
-                    pyarrow_validation,
-                )
-
         if attr_fields:
             attr_group_name = elem.local_name + "@attributes"
             attr_group = parent_xpath_elem.add_child(
@@ -475,8 +481,22 @@ def convert_xsd_elem(elem, xpath_elem, xpath, max_recursion, recursion_check_lis
             for attr_name, attr_values in attr_fields.items():
                 attr_group.add_child(
                     attr_name,
+                    ElementType.SIMPLE,
                     *attr_values,
                 )
+
+        if elem.type.has_mixed_content():
+            pyarrow_type, casting_exp, validation_exp = map_xsd_simple_type_to_arrow(
+                elem.type
+            )
+            parent_xpath_elem.add_child(
+                elem.local_name,
+                ElementType.SIMPLE,
+                pyarrow_type,
+                nullable,
+                casting_exp,
+                validation_exp,
+            )
 
         if elem.type.has_complex_content() or elem.type.has_mixed_content():
             child_counter = 0
@@ -493,28 +513,38 @@ def convert_xsd_elem(elem, xpath_elem, xpath, max_recursion, recursion_check_lis
                 convert_xsd_elem(
                     child_elem,
                     parent_xpath_elem,
-                    xpath,
                     max_recursion,
                     recursion_check_list,
                 )
 
                 recursion_check_list = old_recursion_check_list
 
+                if elem.type.has_mixed_content():
+                    parent_xpath_elem.add_child(
+                        child_elem.local_name + "@tail",
+                        ElementType.SIMPLE,
+                        pa.string(),
+                        nullable,
+                        None,
+                        None,
+                    )
+
+            # Edge case if all children fail recursion. Remove the parent which is empty.
             if elem.type.has_complex_content() and child_counter == 0:
                 xpath_elem.remove_child(elem.local_name)
 
 
 def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
 
-    xpath_root = XmlNode("root", 0, [], ElementType.DICT, None, None, True, None, None)
+    xpath_root = XmlElement("root", [], ElementType.DICT, None, True, None, None, None)
 
     for elem in xsd_schema.elements.values():
         if not elem.is_global():
             continue
+
         convert_xsd_elem(
             elem,
             xpath_root,
-            xpath=[],
             max_recursion=max_recursion,
             recursion_check_list=[],
         )
@@ -530,10 +560,10 @@ def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
 
 
 def convert_xpath_tree_to_pyarrow_schema(
-    xpath_root, xpath_list=None, flat_attributes=False, flat_elements=False
+    xpath_root, xpaths=None, flat_attributes=False, flat_elements=False
 ):
 
-    xpath_root.reset_and_trim_fields(xpath_list)
+    xpath_root.reset_and_trim_fields(xpaths)
 
     # flatten elements
     if flat_elements:

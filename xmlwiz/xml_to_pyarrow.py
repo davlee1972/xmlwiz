@@ -27,10 +27,11 @@ import isodate
 from decimal import Decimal
 import pyarrow.compute as pc
 
-from xmlwiz.mappings import ElementType
+from xmlwiz.mappings import ComputeType
 
-def xml_to_python_check(element_type):
-    if element_type in [
+
+def xml_to_python_check(python_type):
+    if python_type in [
         ElementType.DECIMAL,
         ElementType.DURATION,
         ElementType.DATE,
@@ -39,33 +40,34 @@ def xml_to_python_check(element_type):
         ElementType.GEGORIAN,
     ]:
         return True
-    elif isinstance(element_type, tuple) and element_type[0] == ElementType.LIST:
+    elif isinstance(python_type, tuple) and python_type[0] == ElementType.LIST:
         return True
     else:
         return False
 
-def xml_to_python(elem_text, element_type):
+
+def xml_to_python(elem_text, python_type):
     # handles decoding element text to python data
 
-    if isinstance(element_type, tuple) and element_type[0] == ElementType.LIST:
+    if isinstance(python_type, tuple) and python_type[0] == ElementType.LIST:
         elem_list = elem_text.split(" ")
         elem_list = [
-            element_element_type(elem_item, element_type[1]) for elem_item in elem_list
+            element_python_type(elem_item, python_type[1]) for elem_item in elem_list
         ]
         return elem_list
-    elif element_type == ElementType.DECIMAL:
+    elif python_type == ElementType.DECIMAL:
         return Decimal(elem_text)
-    elif element_type == ElementType.DURATION:
+    elif python_type == ElementType.DURATION:
         dur = isodate.parse_duration(elem_text)
         microseconds = int(dur.total_seconds() * 1_000_000)
         return microseconds
-    elif element_type == ElementType.DATE:
+    elif python_type == ElementType.DATE:
         return datetime.fromisoformat(elem_text).date()
-    elif element_type == ElementType.TIMESTAMP:
+    elif python_type == ElementType.TIMESTAMP:
         return datetime.fromisoformat(elem_text)
-    elif element_type == ElementType.TIME:
+    elif python_type == ElementType.TIME:
         return datetime.strptime(elem_text, "%H:%M:%S %z").time()
-    elif element_type == ElementType.GEGORIAN:
+    elif python_type == ElementType.GEGORIAN:
         date_parts = elem_text.split("-")
         date_len = len(date_parts)
         """
@@ -106,4 +108,3 @@ def apply_facet(facet_name, vector, value):
         )
     elif facet_name == "whitespace" and value == "replace":
         return pc.replace_substring_regex(vector, pattern=r"\s", replacement="")
-
