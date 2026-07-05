@@ -6,8 +6,7 @@
 <!-- python xml_wiz.py -o jsonl -p /company/departments -t . -x .\test\data\company_complex.xsd .\test\data\company_complex.xml -->
 <!-- python xml_wiz.py -o jsonl -p /company/departments/department/subDepartments/department/employees -t . -x .\test\data\company_complex.xsd .\test\data\company_complex.xml -->
 
-<company xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:noNamespaceSchemaLocation="company_complex.xsd">
+<company xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
    <companyInfo>
       <name>TechCorp International</name>
       <founded>2010-05-15</founded>
