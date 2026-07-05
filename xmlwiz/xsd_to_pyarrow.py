@@ -98,7 +98,7 @@ class XmlElement:
     def iter_field_elem(self):
         yield self
         for child_elem in self.field_children.values():
-            yield from child_elem.iter_elem()
+            yield from child_elem.iter_field_elem()
 
     def find_elem(self, xml_path):
 
@@ -356,8 +356,6 @@ def map_xsd_simple_type_to_arrow(xsd_type):
     pyarrow_type = XSD_TO_PYARROW.get(local_name, pa.string())
     if pyarrow_type == "numeric":
         pyarrow_type = pyarrow_numeric(xsd_type)
-        if isinstance(pyarrow_type, pa.FixedSizeBinaryType):
-            casting_exp.append(ComputeType.DECIMAL)
 
     return (
         pyarrow_type,
