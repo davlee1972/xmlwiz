@@ -52,7 +52,7 @@
           </xs:complexType>
         </xs:element>
 
-        <xs:element name="listOfNumerics">
+        <xs:element name="listOfNumerics" maxOccurs="unbounded">
           <xs:complexType>
             <xs:sequence>
               <xs:element name="decimalType" type="xs:decimal" maxOccurs="unbounded"/>
