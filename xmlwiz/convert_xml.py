@@ -53,7 +53,8 @@ from xmlwiz.xsd_to_pyarrow import (
 )
 
 from xmlwiz.xml_to_pyarrow import (
-    xml_to_python,
+    cast_vector_data,
+    set_pyarrow_data
 )
 
 _logger = logging.getLogger(__name__)
@@ -137,10 +138,12 @@ def parse_xml(xml_file, xpath_root, xpath_list):
                             # attr_data = xml_to_python(v, attribute.element_type)
                             attribute.data_vector.append(attr_text)
             else:
+                if skip is False:
+                    skip_xpath = current_xpath.copy()
                 skip = True
-                skip_xpath = current_xpath.copy()
 
         elif event == "end":
+
             if skip == True:
                 if skip_xpath == current_xpath:
                     skip = False
@@ -192,44 +195,14 @@ def parse_xml(xml_file, xpath_root, xpath_list):
             del current_xpath[-1]
             current_level -= 1
 
-    xpath_root.data_counter = 1
-    for xpath_elem in reversed(list(xpath_root.iter_elem())):
-        if xpath_elem.data_counter:
-            if xpath_elem.element_type in (ElementType.DICT, ElementType.LIST_OF_DICT):
-                data = {
-                    k: v.data_pyarrow
-                    for k, v in xpath_elem.children.items()
-                    if v.data_pyarrow
-                }
-                if data:
-                    data = pa.StructArray.from_arrays(
-                        arrays=data.values(), names=data.keys()
-                    )
-                    if xpath_elem.element_type == ElementType.LIST_OF_DICT:
-                        xpath_elem.data_pyarrow = pa.ListArray.from_arrays(
-                            xpath_elem.data_offsets, data
-                        )
-                    else:
-                        xpath_elem.data_pyarrow = data
-            elif xpath_elem.element_type == ElementType.LIST:
-                if xpath_elem.data_vector:
-                    xpath_elem.data_pyarrow = pa.ListArray.from_arrays(
-                        xpath_elem.data_offsets, xpath_elem.data_vector
-                    )
-            elif xpath_elem.data_vector:
-                if xpath_elem.parent and xpath_elem.parent.element_type in (
-                    ElementType.DICT,
-                    ElementType.LIST_OF_DICT,
-                ):
-                    missing_rows = (
-                        xpath_elem.parent.data_counter - xpath_elem.data_counter
-                    )
-                    if missing_rows > 0:
-                        xpath_elem.data_vector.extend([None] * missing_rows)
-                        xpath_elem.data_counter += missing_rows
-                xpath_elem.data_pyarrow = pa.array(xpath_elem.data_vector)
+    cast_vector_data(xpath_root)
+    set_pyarrow_data(xpath_root)
 
-    return
+    if xpath_list:
+        xpath_elem = xpath_root.find_elem(xpath_list)
+        yield xpath_elem.data_pyarrow
+    else:
+        yield xpath_root.data_pyarrow
 
 
 def open_gzip_file(gzipfile, filename):
@@ -248,6 +221,10 @@ def xml_batcher(xml_file, parser_index, xpath_list, rows_per_batch):
     row_counter = 0
     results = []
     for xml_dict in parse_xml(xml_file, parser_index, xpath_list):
+
+        if isinstance(xml_dict, pa.ListArray):
+            xml_dict = xml_dict.flatten()
+
         results.append(xml_dict)
         row_counter += 1
 
@@ -266,7 +243,6 @@ def write_json(
     input_file,
     parser_index,
     xpath_list,
-    schema_type,
     processed,
     output_format,
     rows_per_batch,
@@ -282,13 +258,10 @@ def write_json(
         for xml_batch in xml_batcher(
             xml_file, parser_index, xpath_list, rows_per_batch
         ):
-            arrow_obj = pa.array(xml_batch).cast(schema_type)
 
-            if pa.types.is_struct(arrow_obj.type):
-                table = pa.Table.from_struct_array(arrow_obj)
-            else:
-                arrow_obj = arrow_obj.flatten()
-                table = pa.Table.from_struct_array(arrow_obj)
+            table = pa.Table.from_batches([
+                pa.RecordBatch.from_struct_array(s) for s in xml_batch
+            ])
 
             pylist = table.to_pylist()
 
@@ -359,13 +332,10 @@ def write_parquet(
         for xml_batch in xml_batcher(
             xml_file, parser_index, xpath_list, rows_per_batch
         ):
-            arrow_obj = pa.array(xml_batch).cast(schema_type)
 
-            if pa.types.is_struct(arrow_obj.type):
-                table = pa.Table.from_struct_array(arrow_obj)
-            else:
-                arrow_obj = arrow_obj.flatten()
-                table = pa.Table.from_struct_array(arrow_obj)
+            table = pa.Table.from_batches([
+                pa.RecordBatch.from_struct_array(s) for s in xml_batch
+            ])
 
             if table.num_rows > 0:
                 writer.write_table(table)
@@ -441,10 +411,11 @@ def parse_xml_file(
         xpath_list = xml_path.split("/")
         xpath_list = xpath_list[1:]
 
+
     pyarrow_schema = convert_xpath_tree_to_pyarrow_schema(
         xpath_root, xpath_list, flat_attributes, flat_elements
     )
-
+    
     _logger.info("Parsing " + xml_file)
     _logger.info("Writing to file " + output_file)
 
@@ -455,7 +426,6 @@ def parse_xml_file(
             xml_file,
             xpath_root,
             xpath_list,
-            pyarrow_schema,
             processed,
             output_format,
             rows_per_batch,
@@ -515,7 +485,6 @@ def convert_xml(
     :param log_level: stdout log messaging level
     :param log_file: optional log file
     :param xml_files: list of xml_files
-
     """
 
     formatter = logging.Formatter(

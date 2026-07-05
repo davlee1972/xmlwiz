@@ -42,24 +42,21 @@ class ElementType(IntEnum):
 # temporary enum will be replaced with a class that contains pyarrow.compute.Expression(s)
 class ComputeType(IntEnum):
     LIST = 1
-    DECIMAL = 2
-    DURATION = 3
-    DATE = 4
-    TIMESTAMP = 5
-    TIME = 6
-    GEGORIAN = 7
-    LESS = 8
-    LESS_EQUAL = 9
-    GREATER = 10
-    GREATER_EQUAL = 11
-    UTF8_TRIM_WHITESPACE = 12
-    REPLACE_SUBSTRING_REGEX = 13
+    DURATION = 2
+    TIMESTAMP = 3
+    TIME = 4
+    GEGORIAN = 5
+    LESS = 6
+    LESS_EQUAL = 7
+    GREATER = 8
+    GREATER_EQUAL = 9
+    UTF8_TRIM_WHITESPACE = 10
+    REPLACE_SUBSTRING_REGEX = 11
 
 
 # used to convert element text to pyarrow types
 # this is needed if pyarrow cannot cast string values directly to pyarrow types
 XSD_TO_COMPUTE_DECODE = {
-    "date": ComputeType.DATE,
     "time": ComputeType.TIME,
     "dateTime": ComputeType.TIMESTAMP,
     "duration": ComputeType.DURATION,
