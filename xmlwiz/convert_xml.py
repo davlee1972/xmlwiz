@@ -91,6 +91,7 @@ def parse_xml(xml_file, xpath_root, xpath_list):
     current_xpath = []
 
     skip = False
+    skip_xpath = None
 
     context = etree.iterparse(
         xml_file,
@@ -102,9 +103,11 @@ def parse_xml(xml_file, xpath_root, xpath_list):
     )
 
     for event, elem in context:
+
+        elem.tag = etree.QName(elem.tag).localname        
+
         if event == "start":
             current_level += 1
-            elem.tag = etree.QName(elem.tag).localname
             current_xpath.append(elem.tag)
 
             if (
@@ -135,9 +138,13 @@ def parse_xml(xml_file, xpath_root, xpath_list):
                             attribute.data_vector.append(attr_text)
             else:
                 skip = True
+                skip_xpath = current_xpath.copy()
 
         elif event == "end":
-            if skip == False:
+            if skip == True:
+                if skip_xpath == current_xpath:
+                    skip = False
+            else:
                 xpath_elem.data_counter += 1
 
                 # add offsets to track how many child rows belong to this list
@@ -163,6 +170,22 @@ def parse_xml(xml_file, xpath_root, xpath_list):
 
                 # elem_data = xml_to_python(elem.text, xpath_elem.element_type)
                 xpath_elem.data_vector.append(elem.text)
+
+                if elem.tail:
+                    try:
+                        tail_elem = xpath_elem.children[elem.tag + "@tail"]
+                        missing_rows = (
+                            tail_elem.data_counter - xpath_elem.data_counter + 1
+                        )
+                        if missing_rows > 0:
+                            tail_elem.data_vector.extend([None] * missing_rows)
+                            tail_elem.data_counter += missing_rows
+                        tail_elem.data_vector.append(elem.tail)
+                        tail_elem.data_counter = xpath_elem.data_counter
+                    except:
+                        pass
+                # elem_data = xml_to_python(elem.text, xpath_elem.element_type)
+
                 xpath_elem = xpath_elem.parent
 
             elem.clear()
