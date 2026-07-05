@@ -51,9 +51,10 @@ class XmlElement:
 
     field_name: str | None = None
     field_element_type: int | None = None
-    field_pyarrow_type: pa.DataType | None = (field(default=None, repr=False),)
-    field_parent: XmlElement | None = (field(default=None, repr=False),)
-    field_children: dict[str, XmlElement] = field(default_factory=dict, repr=False)
+    field_data_offsets: list[int | None] | None = None
+    field_pyarrow_type: pa.DataType | None = field(default=None, repr=False)
+    field_parent: XmlElement | None = field(default=None, repr=False)
+    field_children: dict[str, XmlElement] = field(default=None, repr=False)
 
     data_vector: list[str] = field(default_factory=list)
     data_offsets: list[int | None] = field(default_factory=lambda: [0])
@@ -118,37 +119,38 @@ class XmlElement:
             data[tuple(xpath_elem.xpaths)] = xpath_elem.data_vector
         return data
 
-    def reset_and_trim_fields(self, xpaths=None):
+    def reset_fields(self, xpaths=None):
         self.field_name = self.name
         self.field_element_type = self.element_type
         self.field_pyarrow_type = self.pyarrow_type
+        self.field_data_offsets = self.data_offsets
         self.field_parent = self.parent
         self.field_children = self.children
 
         for child_elem in list(self.children.values()):
-            child_elem.reset_and_trim_fields(xpaths)
+            child_elem.reset_fields(xpaths)
 
-        if xpaths:
-            # attributes nad tail trimming is handled by removing parent element
-            try:
-                if self.xpaths[-1].endswith("@attributes") or self.xpaths[-1].endswith(
-                    "@tail"
-                ):
-                    return
-            except:
-                pass
+    def trim_elements(self, xpaths):
+        # attributes nad tail trimming is handled by removing parent element
+        try:
+            if self.xpaths[-1].endswith("@attributes") or self.xpaths[-1].endswith(
+                "@tail"
+            ):
+                return
+        except:
+            pass
 
-            try:
-                if self.field_parent.xpaths[-1].endswith(
-                    "@attributes"
-                ) or self.field_parent.xpaths[-1].endswith("@attributes"):
-                    return
-            except:
-                pass
+        try:
+            if self.parent.xpaths[-1].endswith("@attributes") or self.parent.xpaths[
+                -1
+            ].endswith("@tail"):
+                return
+        except:
+            pass
 
-            # we do not have a match between xpaths and self.xpaths
-            if not all(a == b for a, b in zip(xpaths, self.xpaths)):
-                self.parent.remove_child(self.name)
+        # we do not have a match between xpaths and self.xpaths
+        if not all(a == b for a, b in zip(xpaths, self.xpaths)):
+            self.parent.remove_child(self.name)
 
     def flatten_elements(self):
         if not self.name.endswith("@attributes") and len(self.field_children) == 1:
@@ -156,13 +158,16 @@ class XmlElement:
             # move all child child items up a level
             self.field_children = child_elem.field_children
             self.field_element_type = child_elem.field_element_type
+            self.field_data_offsets = child_elem.field_data_offsets
             # change parent to this self
             for child_elem2 in self.field_children.values():
                 child_elem2.field_parent = self
             # clear out child
             child_elem.field_name = child_elem.field_element_type = (
                 child_elem.field_pyarrow_type
-            ) = child_elem.field_parent = child_elem.field_children = None
+            ) = child_elem.field_data_offsets = child_elem.field_parent = (
+                child_elem.field_children
+            ) = None
 
         for child_elem in self.field_children.values():
             child_elem.flatten_elements()
@@ -189,8 +194,8 @@ class XmlElement:
                 else:
                     self.field_parent.field_children[child] = child_elem
             self.field_name = self.field_element_type = self.field_pyarrow_type = (
-                self.field_parent
-            ) = self.field_children = None
+                self.field_data_offsets
+            ) = self.field_parent = self.field_children = None
         else:
             for child_elem in self.field_children.values():
                 child_elem.flatten_attributes()
@@ -324,7 +329,7 @@ def pyarrow_numeric(xsd_type):
             elif totalDigits <= 76:
                 return pa.decimal256(totalDigits, 0)
         else:
-            return pa.uint64()
+            return pa.int64()
     else:
         return pa.int64()
 
@@ -561,7 +566,7 @@ def convert_xpath_tree_to_pyarrow_schema(
     xpath_root, xpaths=None, flat_attributes=False, flat_elements=False
 ):
 
-    xpath_root.reset_and_trim_fields(xpaths)
+    xpath_root.reset_fields()
 
     # flatten elements
     if flat_elements:

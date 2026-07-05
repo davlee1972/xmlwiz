@@ -52,10 +52,7 @@ from xmlwiz.xsd_to_pyarrow import (
     convert_xpath_tree_to_pyarrow_schema,
 )
 
-from xmlwiz.xml_to_pyarrow import (
-    cast_vector_data,
-    set_pyarrow_data
-)
+from xmlwiz.xml_to_pyarrow import cast_vector_data, set_pyarrow_data
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -84,7 +81,7 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml(xml_file, xpath_root, xpath_list):
+def parse_xml_file(xml_file, xpath_root, xpath_list, flat_attributes, flat_elements):
 
     xpath_elem = xpath_root
 
@@ -104,8 +101,7 @@ def parse_xml(xml_file, xpath_root, xpath_list):
     )
 
     for event, elem in context:
-
-        elem.tag = etree.QName(elem.tag).localname        
+        elem.tag = etree.QName(elem.tag).localname
 
         if event == "start":
             current_level += 1
@@ -122,28 +118,30 @@ def parse_xml(xml_file, xpath_root, xpath_list):
                     ElementType.LIST_OF_DICT,
                 ):
                     if elem.attrib:
-                        attr_group = xpath_elem.children[elem.tag + "@attributes"]
-                        attr_group.data_counter += 1
-                        for attr_tag, attr_text in elem.attrib.items():
-                            attr_tag = etree.QName(attr_tag).localname
+                        try:
+                            attr_group = xpath_elem.children[elem.tag + "@attributes"]
+                            attr_group.data_counter += 1
+                            for attr_tag, attr_text in elem.attrib.items():
+                                attr_tag = etree.QName(attr_tag).localname
 
-                            attribute = attr_group.children[attr_tag]
-                            attribute.data_counter += 1
-                            missing_rows = (
-                                attr_group.data_counter - attribute.data_counter
-                            )
-                            if missing_rows > 0:
-                                attribute.data_vector.extend([None] * missing_rows)
-                                attribute.data_counter += missing_rows
-                            # attr_data = xml_to_python(v, attribute.element_type)
-                            attribute.data_vector.append(attr_text)
+                                attribute = attr_group.children[attr_tag]
+                                attribute.data_counter += 1
+                                missing_rows = (
+                                    attr_group.data_counter - attribute.data_counter
+                                )
+                                if missing_rows > 0:
+                                    attribute.data_vector.extend([None] * missing_rows)
+                                    attribute.data_counter += missing_rows
+                                # attr_data = xml_to_python(v, attribute.element_type)
+                                attribute.data_vector.append(attr_text)
+                        except:
+                            pass
             else:
                 if skip is False:
                     skip_xpath = current_xpath.copy()
                 skip = True
 
         elif event == "end":
-
             if skip == True:
                 if skip_xpath == current_xpath:
                     skip = False
@@ -196,6 +194,13 @@ def parse_xml(xml_file, xpath_root, xpath_list):
             current_level -= 1
 
     cast_vector_data(xpath_root)
+
+    xpath_root.reset_fields()
+    if flat_elements:
+        xpath_root.flatten_elements()
+    if flat_attributes:
+        xpath_root.flatten_attributes()
+
     set_pyarrow_data(xpath_root)
 
     if xpath_list:
@@ -217,15 +222,18 @@ def open_gzip_file(gzipfile, filename):
         return open(filename, "wb")
 
 
-def xml_batcher(xml_file, parser_index, xpath_list, rows_per_batch):
+def xml_batcher(
+    xml_file, parser_index, xpath_list, rows_per_batch, flat_attributes, flat_elements
+):
     row_counter = 0
     results = []
-    for xml_dict in parse_xml(xml_file, parser_index, xpath_list):
+    for xml_arrow in parse_xml_file(
+        xml_file, parser_index, xpath_list, flat_attributes, flat_elements
+    ):
+        while isinstance(xml_arrow, pa.ListArray):
+            xml_arrow = xml_arrow.flatten()
 
-        if isinstance(xml_dict, pa.ListArray):
-            xml_dict = xml_dict.flatten()
-
-        results.append(xml_dict)
+        results.append(xml_arrow)
         row_counter += 1
 
         if row_counter == rows_per_batch:
@@ -241,11 +249,13 @@ def write_json(
     output_file,
     gzipfile,
     input_file,
-    parser_index,
+    xpath_root,
     xpath_list,
     processed,
     output_format,
     rows_per_batch,
+    flat_attributes,
+    flat_elements,
 ):
 
     def write_xml_to_json(xml_file, processed):
@@ -255,13 +265,12 @@ def write_json(
         :return: data found and processed
         """
 
-        for xml_batch in xml_batcher(
-            xml_file, parser_index, xpath_list, rows_per_batch
-        ):
-
-            table = pa.Table.from_batches([
-                pa.RecordBatch.from_struct_array(s) for s in xml_batch
-            ])
+        for xml_batch in xml_batcher(xml_file, xpath_root, xpath_list, rows_per_batch, flat_attributes, flat_elements):
+            if xml_batch == [None]:
+                return processed
+            table = pa.Table.from_batches(
+                [pa.RecordBatch.from_struct_array(s) for s in xml_batch]
+            )
 
             pylist = table.to_pylist()
 
@@ -314,11 +323,13 @@ def write_json(
 def write_parquet(
     output_file,
     input_file,
-    parser_index,
+    xpath_root,
     xpath_list,
     schema_type,
     processed,
     rows_per_batch,
+    flat_attributes,
+    flat_elements,
 ):
 
     def write_xml_to_parquet(xml_file, processed):
@@ -330,12 +341,20 @@ def write_parquet(
         """
 
         for xml_batch in xml_batcher(
-            xml_file, parser_index, xpath_list, rows_per_batch
+            xml_file,
+            xpath_root,
+            xpath_list,
+            rows_per_batch,
+            flat_attributes,
+            flat_elements,
         ):
 
-            table = pa.Table.from_batches([
-                pa.RecordBatch.from_struct_array(s) for s in xml_batch
-            ])
+            if xml_batch == [None]:
+                return processed
+
+            table = pa.Table.from_batches(
+                [pa.RecordBatch.from_struct_array(s) for s in xml_batch]
+            )
 
             if table.num_rows > 0:
                 writer.write_table(table)
@@ -375,7 +394,7 @@ def write_parquet(
         return processed
 
 
-def parse_xml_file(
+def convert_xml_file(
     xsd_file,
     xml_file,
     xml_path,
@@ -410,12 +429,8 @@ def parse_xml_file(
     if xml_path:
         xpath_list = xml_path.split("/")
         xpath_list = xpath_list[1:]
+        xpath_root.trim_elements(xpath_list)
 
-
-    pyarrow_schema = convert_xpath_tree_to_pyarrow_schema(
-        xpath_root, xpath_list, flat_attributes, flat_elements
-    )
-    
     _logger.info("Parsing " + xml_file)
     _logger.info("Writing to file " + output_file)
 
@@ -429,6 +444,8 @@ def parse_xml_file(
             processed,
             output_format,
             rows_per_batch,
+            flat_attributes,
+            flat_elements,
         )
 
     elif output_format in ["parquet"]:
@@ -440,6 +457,8 @@ def parse_xml_file(
             pyarrow_schema,
             processed,
             rows_per_batch,
+            flat_attributes,
+            flat_elements,
         )
 
     # Remove output file if no data is generated
@@ -579,7 +598,7 @@ def convert_xml(
 
         if multi > 1:
             parse_queue_pool.apply_async(
-                parse_xml_file,
+                convert_xml_file,
                 args=(
                     xsd_file,
                     xml_file,
@@ -597,7 +616,7 @@ def convert_xml(
                 error_callback=_logger.info,
             )
         else:
-            parse_xml_file(
+            convert_xml_file(
                 xsd_file,
                 xml_file,
                 xml_path,
