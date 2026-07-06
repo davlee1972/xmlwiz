@@ -68,12 +68,16 @@ def xml_to_pyarrow(compute_type, data_vector, pyarrow_type):
             if date_len == 1:
                 new_vector.append({"yyyy": int(date_parts[0])})
             elif date_len == 2:
-                new_vector.append({"yyyy": int(date_parts[0]), "mm": int(date_parts[1])})
+                new_vector.append(
+                    {"yyyy": int(date_parts[0]), "mm": int(date_parts[1])}
+                )
             elif date_len == 3:
                 new_vector.append({"mm": int(date_parts[2])})
             elif date_len == 4:
                 if date_parts[2]:
-                    new_vector.append({"mm": int(date_parts[2]), "dd": int(date_parts[3])})
+                    new_vector.append(
+                        {"mm": int(date_parts[2]), "dd": int(date_parts[3])}
+                    )
                 else:
                     new_vector.append({"dd": int(date_parts[3])})
         data_vector = pa.array(new_vector).cast(pyarrow_type)
@@ -127,9 +131,15 @@ def cast_vector_data(xpath_root):
                     )
 
 
-def set_pyarrow_data(xpath_root):
+def set_pyarrow_data(xpath_root, full_schema=False):
     for xpath_elem in reversed(list(xpath_root.iter_field_elem())):
-        if xpath_elem.field_element_type in (ElementType.DICT, ElementType.LIST_OF_DICT):
+        if xpath_elem.field_element_type in (
+            ElementType.DICT,
+            ElementType.LIST_OF_DICT,
+            ElementType.SIMPLE_DICT,
+            ElementType.SIMPLE_LIST_OF_DICT,
+        ):
+
             data = {
                 k: v.data_pyarrow
                 for k, v in xpath_elem.field_children.items()
@@ -146,12 +156,19 @@ def set_pyarrow_data(xpath_root):
                 data = pa.StructArray.from_arrays(
                     arrays=data.values(), fields=struct_fields
                 )
-                if xpath_elem.field_element_type == ElementType.LIST_OF_DICT:
-                    xpath_elem.data_pyarrow = pa.ListArray.from_arrays(
+                if xpath_elem.field_element_type in (
+                    ElementType.LIST_OF_DICT,
+                    ElementType.SIMPLE_LIST_OF_DICT,
+                ):
+                    data = pa.ListArray.from_arrays(
                         xpath_elem.field_data_offsets, data
                     )
-                else:
-                    xpath_elem.data_pyarrow = data
+
+            if data and full_schema:
+                data = data.cast(xpath_elem.field_pyarrow_type)
+
+            if data:
+                xpath_elem.data_pyarrow = data
 
         elif xpath_elem.field_element_type == ElementType.LIST:
             if xpath_elem.data_vector:
