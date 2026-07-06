@@ -113,13 +113,21 @@ class XmlElement:
             if xpath_elem.xpaths == xpaths:
                 return xpath_elem
 
-    def get_data(self):
+    def get_data_vector(self):
         data = {}
         for xpath_elem in self.iter_elem():
             data[tuple(xpath_elem.xpaths)] = xpath_elem.data_vector
         return data
 
-    def reset_fields(self, xpaths=None):
+
+    def clear_data(self):
+        for elem in self.iter_elem():
+            elem.data_vector = []
+            elem.data_offsets = [0]
+            elem.data_counter = 0
+            elem.data_pyarrow = None
+
+    def reset_fields(self):
         self.field_name = self.name
         self.field_element_type = self.element_type
         self.field_pyarrow_type = self.pyarrow_type
@@ -128,10 +136,10 @@ class XmlElement:
         self.field_children = self.children
 
         for child_elem in list(self.children.values()):
-            child_elem.reset_fields(xpaths)
+            child_elem.reset_fields()
 
     def trim_elements(self, xpaths):
-        # attributes nad tail trimming is handled by removing parent element
+        # attributes and tail trimming is handled by removing parent element
         try:
             if self.xpaths[-1].endswith("@attributes") or self.xpaths[-1].endswith(
                 "@tail"
@@ -155,6 +163,8 @@ class XmlElement:
     def flatten_elements(self):
         if not self.name.endswith("@attributes") and len(self.field_children) == 1:
             child, child_elem = next(iter(self.field_children.items()))
+            if child.endswith("@attributes"):
+                return
             # move all child child items up a level
             self.field_children = child_elem.field_children
             self.field_element_type = child_elem.field_element_type
@@ -211,21 +221,29 @@ class XmlElement:
                 self.nullable,
             )
 
-        elif self.field_element_type in [ElementType.DICT, ElementType.LIST_OF_DICT]:
+        elif self.field_element_type in (
+            ElementType.DICT,
+            ElementType.LIST_OF_DICT,
+            ElementType.SIMPLE_DICT,
+            ElementType.SIMPLE_LIST_OF_DICT,
+        ):
             struct_fields = []
             for child_elem in self.field_children.values():
                 struct_fields.append(child_elem.set_pyarrow_type())
 
             struct_type = pa.struct(struct_fields)
 
-            if self.field_element_type == ElementType.DICT:
+            if self.field_element_type in (ElementType.DICT, ElementType.SIMPLE_DICT):
                 self.field_pyarrow_type = struct_type
                 return (
                     self.field_name,
                     self.field_pyarrow_type,
                     self.nullable,
                 )
-            elif self.field_element_type == ElementType.LIST_OF_DICT:
+            elif self.field_element_type in (
+                ElementType.LIST_OF_DICT,
+                ElementType.SIMPLE_LIST_OF_DICT,
+            ):
                 self.field_pyarrow_type = pa.list_(struct_type)
                 return (
                     self.field_name,
@@ -250,13 +268,13 @@ def pyarrow_numeric(xsd_type):
         local_name = xsd_type.local_name
         base_type = xsd_type
 
-    if local_name in [
+    if local_name in (
         "decimal",
         "positiveInteger",
         "nonNegativeInteger",
         "negativeInteger",
         "nonPositiveInteger",
-    ]:
+    ):
         totalDigits = facets.get("totalDigits", None)
         fractionDigits = facets.get("totalDigits", totalDigits)
         max_value = facets.get("maxInclusive", facets.get("maxExclusive", None))
@@ -274,7 +292,7 @@ def pyarrow_numeric(xsd_type):
                 return pa.decima1256(totalDigits, fractionDigits)
         else:
             return pa.decimal128(38, 10)
-    elif local_name in ["positiveInteger", "nonNegativeInteger"]:
+    elif local_name in ("positiveInteger", "nonNegativeInteger"):
         max_value = facets.get("maxInclusive", facets.get("maxExclusive", None))
         if max_value:
             if max_value <= (1 << 8) - 1:
@@ -304,7 +322,7 @@ def pyarrow_numeric(xsd_type):
                 return pa.decimal256(totalDigits, 0)
         else:
             return pa.uint64()
-    elif local_name in ["negativeInteger", "nonPositiveInteger"]:
+    elif local_name in ("negativeInteger", "nonPositiveInteger"):
         min_value = facets.get("minInclusive", facets.get("minExclusive", None))
         if min_value:
             if min_value >= -(1 << (8 - 1)):
@@ -415,21 +433,47 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                 if elem.max_occurs is None or elem.max_occurs > 1:
                     parent_xpath_elem = xpath_elem.add_child(
                         elem.local_name,
-                        ElementType.LIST_OF_DICT,
-                        pyarrow_type,
+                        ElementType.SIMPLE_LIST_OF_DICT,
+                        None,
                         nullable,
-                        casting_exp,
-                        validation_exp,
+                        None,
+                        None,
                     )
                 else:
                     parent_xpath_elem = xpath_elem.add_child(
                         elem.local_name,
-                        ElementType.DICT,
-                        pyarrow_type,
+                        ElementType.SIMPLE_DICT,
+                        None,
                         nullable,
-                        casting_exp,
-                        validation_exp,
+                        None,
+                        None,
                     )
+
+                attr_group_name = elem.local_name + "@attributes"
+                attr_group = parent_xpath_elem.add_child(
+                    attr_group_name,
+                    ElementType.DICT,
+                    None,
+                    attributes_nullable,
+                    None,
+                    None,
+                )
+                for attr_name, attr_values in attr_fields.items():
+                    attr_group.add_child(
+                        attr_name,
+                        ElementType.SIMPLE,
+                        *attr_values,
+                    )
+
+                parent_xpath_elem.add_child(
+                    elem.local_name,
+                    ElementType.SIMPLE,
+                    pyarrow_type,
+                    nullable,
+                    casting_exp,
+                    validation_exp,
+                )
+
             else:
                 if elem.max_occurs is None or elem.max_occurs > 1:
                     parent_xpath_elem = xpath_elem.add_child(
@@ -471,56 +515,61 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                     None,
                 )
 
-        if attr_fields:
-            attr_group_name = elem.local_name + "@attributes"
-            attr_group = parent_xpath_elem.add_child(
-                attr_group_name,
-                ElementType.DICT,
-                None,
-                attributes_nullable,
-                None,
-                None,
-            )
-            for attr_name, attr_values in attr_fields.items():
-                attr_group.add_child(
-                    attr_name,
+            if attr_fields:
+                attr_group_name = elem.local_name + "@attributes"
+                attr_group = parent_xpath_elem.add_child(
+                    attr_group_name,
+                    ElementType.DICT,
+                    None,
+                    attributes_nullable,
+                    None,
+                    None,
+                )
+                for attr_name, attr_values in attr_fields.items():
+                    attr_group.add_child(
+                        attr_name,
+                        ElementType.SIMPLE,
+                        *attr_values,
+                    )
+
+            if elem.type.has_mixed_content():
+                pyarrow_type, casting_exp, validation_exp = (
+                    map_xsd_simple_type_to_arrow(elem.type)
+                )
+                parent_xpath_elem.add_child(
+                    elem.local_name,
                     ElementType.SIMPLE,
-                    *attr_values,
+                    pyarrow_type,
+                    nullable,
+                    casting_exp,
+                    validation_exp,
                 )
 
-        if elem.type.has_mixed_content():
-            pyarrow_type, casting_exp, validation_exp = map_xsd_simple_type_to_arrow(
-                elem.type
-            )
-            parent_xpath_elem.add_child(
-                elem.local_name,
-                ElementType.SIMPLE,
-                pyarrow_type,
-                nullable,
-                casting_exp,
-                validation_exp,
-            )
+            if elem.type.has_complex_content() or elem.type.has_mixed_content():
+                child_counter = 0
+                for child_elem in elem.type.content.iter_elements():
+                    old_recursion_check_list = recursion_check_list
+                    if child_elem.type.is_complex() and child_elem.type.name:
+                        # add element type name to recursion counter in case child elements come up more than twice (by default).
+                        recursion_check_list = recursion_check_list + [
+                            child_elem.type.name
+                        ]
+                        if (
+                            recursion_check_list.count(child_elem.type.name)
+                            > max_recursion
+                        ):
+                            recursion_check_list = old_recursion_check_list
+                            continue
+                    child_counter += 1
 
-        if elem.type.has_complex_content() or elem.type.has_mixed_content():
-            child_counter = 0
-            for child_elem in elem.type.content.iter_elements():
-                old_recursion_check_list = recursion_check_list
-                if child_elem.type.is_complex() and child_elem.type.name:
-                    # add element type name to recursion counter in case child elements come up more than twice (by default).
-                    recursion_check_list = recursion_check_list + [child_elem.type.name]
-                    if recursion_check_list.count(child_elem.type.name) > max_recursion:
-                        recursion_check_list = old_recursion_check_list
-                        continue
-                child_counter += 1
+                    convert_xsd_elem(
+                        child_elem,
+                        parent_xpath_elem,
+                        max_recursion,
+                        recursion_check_list,
+                    )
 
-                convert_xsd_elem(
-                    child_elem,
-                    parent_xpath_elem,
-                    max_recursion,
-                    recursion_check_list,
-                )
-
-                recursion_check_list = old_recursion_check_list
+                    recursion_check_list = old_recursion_check_list
 
                 if elem.type.has_mixed_content():
                     parent_xpath_elem.add_child(
@@ -532,9 +581,9 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                         None,
                     )
 
-            # Edge case if all children fail recursion. Remove the parent which is empty.
-            if elem.type.has_complex_content() and child_counter == 0:
-                xpath_elem.remove_child(elem.local_name)
+                # Edge case if all children fail recursion. Remove the parent which is empty.
+                if elem.type.has_complex_content() and child_counter == 0:
+                    xpath_elem.remove_child(elem.local_name)
 
 
 def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
@@ -562,7 +611,7 @@ def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
     return xpath_root
 
 
-def convert_xpath_tree_to_pyarrow_schema(
+def convert_xpath_tree_to_schema_type(
     xpath_root, xpaths=None, flat_attributes=False, flat_elements=False
 ):
 
@@ -578,4 +627,7 @@ def convert_xpath_tree_to_pyarrow_schema(
 
     xpath_root.set_pyarrow_type()
 
-    return xpath_root.field_pyarrow_type
+    if xpaths:
+        return xpath_root.find_elem(xpaths).field_pyarrow_type
+    else:
+        return xpath_root.field_pyarrow_type
