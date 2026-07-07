@@ -105,19 +105,8 @@ def apply_facet(facet_name, vector, value):
 
 def cast_vector_data(xpath_root):
     for xpath_elem in xpath_root.iter_elem():
-        if xpath_elem.data_counter:
-            if xpath_elem.element_type == ElementType.SIMPLE:
-                if xpath_elem.parent and xpath_elem.parent.element_type in (
-                    ElementType.DICT,
-                    ElementType.LIST_OF_DICT,
-                ):
-                    missing_rows = (
-                        xpath_elem.parent.data_counter - xpath_elem.data_counter
-                    )
-                    if missing_rows > 0:
-                        xpath_elem.data_vector.extend([None] * missing_rows)
-                        xpath_elem.data_counter += missing_rows
-
+        if xpath_elem.element_type == ElementType.SIMPLE:
+            if xpath_elem.data_counter:
                 if xpath_elem.casting_exp:
                     for compute_type in xpath_elem.casting_exp:
                         xpath_elem.data_pyarrow = xml_to_pyarrow(
@@ -132,6 +121,9 @@ def cast_vector_data(xpath_root):
 
 
 def set_pyarrow_data(xpath_root, full_schema=False):
+    if xpath_root.field_data_counter == 0:
+        xpath_root.field_data_counter = 1
+
     for xpath_elem in reversed(list(xpath_root.iter_field_elem())):
         if xpath_elem.field_element_type in (
             ElementType.DICT,
@@ -141,7 +133,7 @@ def set_pyarrow_data(xpath_root, full_schema=False):
         ):
 
             data = {
-                k: v.data_pyarrow
+                k: pa.concat_arrays([v.data_pyarrow, pa.nulls(xpath_elem.field_data_counter - len(v.data_pyarrow), type=v.data_pyarrow.type)])
                 for k, v in xpath_elem.field_children.items()
                 if v.data_pyarrow
             }
@@ -160,18 +152,26 @@ def set_pyarrow_data(xpath_root, full_schema=False):
                     ElementType.LIST_OF_DICT,
                     ElementType.SIMPLE_LIST_OF_DICT,
                 ):
+
+                    if xpath_elem.data_offsets[-1] != xpath_elem.data_counter:
+                        xpath_elem.data_offsets.append(xpath_elem.data_counter)
+
                     data = pa.ListArray.from_arrays(
-                        xpath_elem.field_data_offsets, data
+                        xpath_elem.data_offsets[:-1] + [None] * (xpath_elem.field_data_counter - len(xpath_elem.data_offsets) + 1) + [xpath_elem.data_offsets[-1]],
+                        data
                     )
 
-            if data and full_schema:
-                data = data.cast(xpath_elem.field_pyarrow_type)
+                if full_schema:
+                    data = data.cast(xpath_elem.field_pyarrow_type)
 
-            if data:
                 xpath_elem.data_pyarrow = data
 
         elif xpath_elem.field_element_type == ElementType.LIST:
             if xpath_elem.data_vector:
+                if xpath_elem.data_offsets[-1] != xpath_elem.data_counter:
+                    xpath_elem.data_offsets.append(xpath_elem.data_counter)
+
                 xpath_elem.data_pyarrow = pa.ListArray.from_arrays(
-                    xpath_elem.field_data_offsets, xpath_elem.data_vector
+                    xpath_elem.data_offsets[:-1] + [None] * (xpath_elem.field_data_counter - len(xpath_elem.data_offsets) + 1) + [xpath_elem.data_offsets[-1]],
+                    xpath_elem.data_vector
                 )

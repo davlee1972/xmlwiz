@@ -111,6 +111,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements,
             ):
                 skip = False
                 xpath_elem = xpath_elem.children[elem.tag]
+                xpath_elem.data_counter += 1
                 if xpath_elem.element_type in (
                     ElementType.DICT,
                     ElementType.LIST_OF_DICT,
@@ -120,7 +121,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements,
                     if elem.attrib:
                         try:
                             attr_group = xpath_elem.children[elem.tag + "@attributes"]
-                            attr_group.data_counter += 1
+                            attr_group.data_counter = xpath_elem.data_counter
                             for attr_tag, attr_text in elem.attrib.items():
                                 attr_tag = etree.QName(attr_tag).localname
 
@@ -146,29 +147,24 @@ def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements,
                 if skip_xpath == current_xpaths:
                     skip = False
             else:
-                xpath_elem.data_counter += 1
 
-                if xpath_elem.element_type in (
-                    ElementType.SIMPLE_DICT,
-                    ElementType.SIMPLE_LIST_OF_DICT,
-                ):
-                    xpath_elem.children[elem.tag].data_vector.append(elem.text)
-                    xpath_elem.children[elem.tag].data_counter = xpath_elem.data_counter
-
-                # fill column with nulls to match number of existing rows before adding new value to column
-                if xpath_elem.parent.element_type in (
-                    ElementType.DICT,
-                    ElementType.LIST_OF_DICT,
-                ):
+                # fill in missing rows with nulls before adding new row
+                if xpath_elem.element_type == ElementType.SIMPLE:
                     missing_rows = (
-                        xpath_elem.parent.data_counter - xpath_elem.data_counter + 1
+                        xpath_elem.parent.data_counter - xpath_elem.data_counter
                     )
                     if missing_rows > 0:
                         xpath_elem.data_vector.extend([None] * missing_rows)
                         xpath_elem.data_counter += missing_rows
 
-                # elem_data = xml_to_python(elem.text, xpath_elem.element_type)
-                xpath_elem.data_vector.append(elem.text)
+                    xpath_elem.data_vector.append(elem.text)
+
+                elif xpath_elem.element_type in (
+                    ElementType.SIMPLE_DICT,
+                    ElementType.SIMPLE_LIST_OF_DICT,
+                ):
+                    xpath_elem.children[elem.tag].data_vector.append(elem.text)
+                    xpath_elem.children[elem.tag].data_counter = xpath_elem.data_counter
 
                 if elem.tail:
                     try:
@@ -185,23 +181,17 @@ def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements,
                         pass
 
                 # add offsets to track how many child rows belong to this list
+                # add None offsets to track how many child rows are missing
                 if xpath_elem.children:
-                    # print(xpath_elem.element_type)
                     for child_elem in xpath_elem.children.values():
                         if child_elem.element_type in (
                             ElementType.SIMPLE_LIST_OF_DICT,
                             ElementType.LIST_OF_DICT,
                             ElementType.LIST,
                         ):
-                            child_elem.data_offsets.append(child_elem.data_counter)
+                            child_elem.data_offsets = child_elem.data_offsets + [None] * (xpath_elem.data_counter - len(child_elem.data_offsets)) + [child_elem.data_counter]
 
                 if xpaths and current_xpaths == xpaths:
-                    if xpath_elem.element_type in (
-                        ElementType.SIMPLE_LIST_OF_DICT,
-                        ElementType.LIST_OF_DICT,
-                        ElementType.LIST,
-                    ):
-                        xpath_elem.data_offsets.append(xpath_elem.data_counter)
 
                     cast_vector_data(xpath_root)
 

@@ -51,7 +51,7 @@ class XmlElement:
 
     field_name: str | None = None
     field_element_type: int | None = None
-    field_data_offsets: list[int | None] | None = None
+    field_data_counter: int = 0
     field_pyarrow_type: pa.DataType | None = field(default=None, repr=False)
     field_parent: XmlElement | None = field(default=None, repr=False)
     field_children: dict[str, XmlElement] = field(default=None, repr=False)
@@ -131,7 +131,7 @@ class XmlElement:
         self.field_name = self.name
         self.field_element_type = self.element_type
         self.field_pyarrow_type = self.pyarrow_type
-        self.field_data_offsets = self.data_offsets
+        self.field_data_counter = self.data_counter
         self.field_parent = self.parent
         self.field_children = self.children
 
@@ -408,14 +408,14 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
         # 1. Process Attributes
         attr_fields = {}
         if hasattr(elem.type, "attributes"):
-            attributes_nullable = True
+            attributes_nullable = False
             for attr in elem.type.attributes.values():
                 pyarrow_type, casting_exp, validation_exp = (
                     map_xsd_simple_type_to_arrow(attr.type)
                 )
                 attr_nullable = attr.use == "optional"
-                if not attr_nullable:
-                    attributes_nullable = False
+                if attr_nullable:
+                    attributes_nullable = True
 
                 attr_fields[attr.name] = (
                     pyarrow_type,
