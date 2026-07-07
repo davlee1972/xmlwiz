@@ -157,7 +157,7 @@ def set_pyarrow_data(xpath_root, full_schema=False):
                         xpath_elem.data_offsets.append(xpath_elem.data_counter)
 
                     data = pa.ListArray.from_arrays(
-                        xpath_elem.data_offsets[:-1] + [None] * (xpath_elem.field_data_counter - len(xpath_elem.data_offsets) + 1) + [xpath_elem.data_offsets[-1]],
+                        xpath_elem.data_offsets[:-1] + [None] * (xpath_elem.parent.field_data_counter - len(xpath_elem.data_offsets) + 1) + [xpath_elem.data_offsets[-1]],
                         data
                     )
 
