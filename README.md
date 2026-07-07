@@ -4,6 +4,85 @@
 
 This repository contains python code for converting XML to JSON, Parquet and Apache Arrow.
 
+# Key Concept
+
+Instead of parsing and validating elements one at a time, the XML Wizard will load XML into data vectors.\
+Once in vector format, operations like string to numeric data casting and validation can be performed in bulk.
+
+Using the XML below as an example:
+
+We have a nested structure with CompanyDirectory > Department > Employees and Employee.
+
+``` xml
+<?xml version="1.0" encoding="UTF-8"?>
+<CompanyDirectory>
+    <!-- Level 1: Root -->
+    
+    <Department>
+        <!-- Level 2: Parent Record -->
+        <DeptName>Engineering</DeptName>
+        <Budget>500000</Budget>
+        
+        <Employees>
+            <!-- Level 3: Child Records (Multiple) -->
+            <Employee>
+                <EmpID>E001</EmpID>
+                <Name>John Smith</Name>
+                <Role>Developer</Role>
+            </Employee>
+            
+            <Employee>
+                <EmpID>E002</EmpID>
+                <Name>Jane Doe</Name>
+                <Role>Designer</Role>
+            </Employee>
+        </Employees>
+        
+    </Department>
+    
+    <Department>
+        <!-- Level 2: Parent Record -->
+        <DeptName>Sales</DeptName>
+        <Budget>300000</Budget>
+        
+        <Employees>
+            <!-- Level 3: Child Records (Multiple) -->
+            <Employee>
+                <EmpID>E003</EmpID>
+                <Name>Bob Brown</Name>
+                <Role>Manager</Role>
+            </Employee>
+        </Employees>
+        
+    </Department>
+
+</CompanyDirectory>
+```
+
+The Employee data is saved using three vectors: EmpID, Name and Role.
+
+| EmpID | Name | Role |
+|-------|------|------|
+| E001 | John Smith | Developer |
+| E002 | Jane Doe | Designer |
+| E003 | Bob Brown | Manager |
+
+These employees belong to Departments which are saved in two vectors: DeptName and Budget.\
+An offset vector is added to track which employees belong to which department.
+
+| DeptName | Budget | employee offsets |
+|----------|--------|--------|
+| Engineering | 500000 | 1 to 2 |
+| Sales | 300000 | 3 to 3 |
+
+This structure allows us to store all our data in single columns even if the xml data is deeply nested.
+
+These vectors are populated as strings when the XML is parsed.
+
+After parsing is completed we can run a column cast on Budget to convert it from a string to an xs:integer.
+
+When applying a XSD restriction check like Budget > 0, we only need to run that check once on the entire budget column.
+
 # Key Features
 
 Converts XML to valid JSON, Parquet or Apache Arrow objects.\
