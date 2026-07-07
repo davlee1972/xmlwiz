@@ -81,9 +81,11 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements, full_schema):
+def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements, rows_per_batch, full_schema):
 
     xpath_elem = xpath_root
+
+    rows_counter = 0
 
     current_xpaths = []
 
@@ -191,24 +193,26 @@ def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements,
                         ):
                             child_elem.data_offsets = child_elem.data_offsets + [None] * (xpath_elem.data_counter - len(child_elem.data_offsets)) + [child_elem.data_counter]
 
-                if xpaths and current_xpaths == xpaths:
+                if rows_per_batch and xpaths and current_xpaths == xpaths:
+                    rows_counter += 1
+                    if rows_counter == rows_per_batch:
+                        cast_vector_data(xpath_root)
 
-                    cast_vector_data(xpath_root)
+                        xpath_root.reset_fields()
+                        if flat_elements:
+                            xpath_root.flatten_elements()
+                        if flat_attributes:
+                            xpath_root.flatten_attributes()
 
-                    xpath_root.reset_fields()
-                    if flat_elements:
-                        xpath_root.flatten_elements()
-                    if flat_attributes:
-                        xpath_root.flatten_attributes()
+                        if full_schema:
+                            xpath_root.set_pyarrow_type()
 
-                    if full_schema:
-                        xpath_root.set_pyarrow_type()
+                        set_pyarrow_data(xpath_root, full_schema)
 
-                    set_pyarrow_data(xpath_root, full_schema)
-
-                    #xpath_elem = xpath_root.find_elem(xpaths)
-                    yield xpath_elem.data_pyarrow
-                    xpath_elem.clear_data()
+                        #xpath_elem = xpath_root.find_elem(xpaths)
+                        yield xpath_elem.data_pyarrow
+                        xpath_elem.clear_data()
+                        rows_counter = 0
 
                 xpath_elem = xpath_elem.parent
 
@@ -228,9 +232,12 @@ def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements,
 
     set_pyarrow_data(xpath_root, full_schema)
 
-    if not xpaths:
+    if xpaths:
+        if rows_counter > 0:
+            xpath_elem = xpath_root.find_elem(xpaths)
+            yield xpath_elem.data_pyarrow
+    else:
         yield xpath_root.data_pyarrow
-
 
 def open_gzip_file(gzipfile, filename):
     """
@@ -242,30 +249,6 @@ def open_gzip_file(gzipfile, filename):
         return gzip.open(filename, "wb")
     else:
         return open(filename, "wb")
-
-
-def xml_batcher(
-    xml_file, parser_index, xpaths, rows_per_batch, flat_attributes, flat_elements, full_schema
-):
-    row_counter = 0
-    results = []
-    for xml_arrow in parse_xml_file(
-        xml_file, parser_index, xpaths, flat_attributes, flat_elements, full_schema
-    ):
-        while isinstance(xml_arrow, pa.ListArray):
-            xml_arrow = xml_arrow.flatten()
-
-        results.append(xml_arrow)
-        row_counter += 1
-
-        if row_counter == rows_per_batch:
-            yield results
-            results = []
-            row_counter = 0
-
-    if row_counter > 0:
-        yield results
-
 
 def write_json(
     output_file,
@@ -287,23 +270,13 @@ def write_json(
         :return: data found and processed
         """
 
-        for xml_batch in xml_batcher(
-            xml_file,
-            xpath_root,
-            xpaths,
-            rows_per_batch,
-            flat_attributes,
-            flat_elements,
-            full_schema=False
+        for xml_arrow in parse_xml_file(
+            xml_file, xpath_root, xpaths, flat_attributes, flat_elements, rows_per_batch, full_schema=False
         ):
-            if xml_batch == [None]:
-                return processed
+            while isinstance(xml_arrow, pa.ListArray):
+                xml_arrow = xml_arrow.flatten()
 
-            tables = [pa.Table.from_batches([pa.RecordBatch.from_struct_array(batch)]) for batch in xml_batch]
-
-            table = pa.concat_tables(tables, promote_options="permissive")
-
-            pylist = table.to_pylist()
+            pylist = xml_arrow.to_pylist()
 
             for row in pylist:
                 xml_json = json.dumps(row, default=json_decoder)
@@ -371,23 +344,15 @@ def write_parquet(
         :return: data found and processed
         """
 
-        for xml_batch in xml_batcher(
-            xml_file,
-            xpath_root,
-            xpaths,
-            rows_per_batch,
-            flat_attributes,
-            flat_elements,
-            full_schema=True
+        for xml_arrow in parse_xml_file(
+            xml_file, xpath_root, xpaths, flat_attributes, flat_elements, rows_per_batch, full_schema=True
         ):
-            if xml_batch == [None]:
-                return processed
+            while isinstance(xml_arrow, pa.ListArray):
+                xml_arrow = xml_arrow.flatten()
 
-            table = pa.Table.from_batches(
-                [pa.RecordBatch.from_struct_array(s) for s in xml_batch]
-            )
+            table = pa.Table.from_struct_array(xml_arrow)
 
-            if table.num_rows > 0:
+            if len(table) > 0:
                 writer.write_table(table)
                 processed = True
 
