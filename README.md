@@ -59,7 +59,7 @@ We have a nested structure with CompanyDirectory > Department > Employees and Em
 </CompanyDirectory>
 ```
 
-The Employee data is saved using three vectors: EmpId, Name and Role.
+The Employee data is saved using three vectors: EmpID, Name and Role.
 
 | EmpID | Name | Role |
 |-------|------|------|
@@ -67,7 +67,7 @@ The Employee data is saved using three vectors: EmpId, Name and Role.
 | E002 | Jane Doe | Designer |
 | E003 | Bob Brown | Manager |
 
-These employees belong to Departments which are saved in two vectors: DeptName and Budget.
+These employees belong to Departments which are saved in two vectors: DeptName and Budget.\
 An offset vector is added to track which employees belong to which department.
 
 | DeptName | Budget | employee offsets |
