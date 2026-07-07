@@ -79,7 +79,7 @@ This structure allows us to store all our data in single columns even if the xml
 
 These vectors are populated as strings when the XML is parsed.
 
-After parsing is completed we can run a column cast on Budget to convert it from a string to an integer.
+After parsing is completed we can run a column cast on Budget to convert it from a string to an xs:integer.
 
 When applying a XSD restriction check like Budget > 0, we only need to run that check once on the entire budget column.
 
