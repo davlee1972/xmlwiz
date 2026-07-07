@@ -59,7 +59,7 @@ We have a nested structure with CompanyDirectory > Department > Employees and Em
 </CompanyDirectory>
 ```
 
-The Employee data is saved using three vectors.
+The Employee data is saved using three vectors: EmpId, Name and Role.
 
 | EmpID | Name | Role |
 |-------|------|------|
@@ -67,19 +67,21 @@ The Employee data is saved using three vectors.
 | E002 | Jane Doe | Designer |
 | E003 | Bob Brown | Manager |
 
-These employees belong to Departments which are saved in two vectors.
-An offset vector is created to track which employees belong to which department.
+These employees belong to Departments which are saved in two vectors: DeptName and Budget.
+An offset vector is added to track which employees belong to which department.
 
-| DeptName | Budget | Offset |
+| DeptName | Budget | employee offsets |
 |----------|--------|--------|
-| Engineering | 500000 | employee 1 to 2 |
-| Sales | 300000 | employee 3 to 3 |
+| Engineering | 500000 | 1 to 2 |
+| Sales | 300000 | 3 to 3 |
 
 This structure allows us to store all our data in single columns even if the xml data is deeply nested.
 
-XML is text based, so we can run a column cast on Budget to convert it from a string to and integer.
-When applying a XSD restriction check like Budget > 0, we only need to run that check once on the entire budget column.
+These vectors are populated as strings when the XML is parsed.
 
+After parsing is completed we can run a column cast on Budget to convert it from a string to an integer.
+
+When applying a XSD restriction check like Budget > 0, we only need to run that check once on the entire budget column.
 
 # Key Features
 
