@@ -37,6 +37,7 @@ from glob import glob
 import gzip
 import tarfile
 from zipfile import ZipFile
+import tempfile
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -44,6 +45,7 @@ from pyarrow.lib import ArrowTypeError
 
 import xmlschema
 from lxml import etree
+import datafusion as df
 
 from xmlwiz.mappings import ElementType
 
@@ -81,7 +83,7 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements, rows_per_batch, full_schema):
+def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
 
     xpath_elem = xpath_root
 
@@ -193,24 +195,18 @@ def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements,
                         ):
                             child_elem.data_offsets = child_elem.data_offsets + [None] * (xpath_elem.data_counter - len(child_elem.data_offsets)) + [child_elem.data_counter]
 
-                if rows_per_batch and xpaths and current_xpaths == xpaths:
+                if current_xpaths == xpaths:
                     rows_counter += 1
-                    if rows_counter == rows_per_batch:
+                    if xpaths and rows_per_batch and rows_counter == rows_per_batch:
+
                         cast_vector_data(xpath_root)
+                        set_pyarrow_data(xpath_root)
 
-                        xpath_root.reset_fields()
-                        if flat_elements:
-                            xpath_root.flatten_elements()
-                        if flat_attributes:
-                            xpath_root.flatten_attributes()
+                        skip_check_elem = xpath_elem
+                        while skip_check_elem.field_skip:
+                            skip_check_elem = next(iter(skip_check_elem.children.values()))
+                        yield skip_check_elem.data_pyarrow
 
-                        if full_schema:
-                            xpath_root.set_pyarrow_type()
-
-                        set_pyarrow_data(xpath_root, full_schema)
-
-                        #xpath_elem = xpath_root.find_elem(xpaths)
-                        yield xpath_elem.data_pyarrow
                         xpath_elem.clear_data()
                         rows_counter = 0
 
@@ -219,24 +215,20 @@ def parse_xml_file(xml_file, xpath_root, xpaths, flat_attributes, flat_elements,
             elem.clear()
             del current_xpaths[-1]
 
-    cast_vector_data(xpath_root)
-
-    xpath_root.reset_fields()
-    if flat_elements:
-        xpath_root.flatten_elements()
-    if flat_attributes:
-        xpath_root.flatten_attributes()
-
-    if full_schema:
-        xpath_root.set_pyarrow_type()
-
-    set_pyarrow_data(xpath_root, full_schema)
-
     if xpaths:
         if rows_counter > 0:
+            cast_vector_data(xpath_root)
+            set_pyarrow_data(xpath_root)
+
             xpath_elem = xpath_root.find_elem(xpaths)
+            while xpath_elem.field_skip:
+                xpath_elem = next(iter(xpath_elem.children.values()))
             yield xpath_elem.data_pyarrow
     else:
+
+        cast_vector_data(xpath_root)
+        set_pyarrow_data(xpath_root)
+
         yield xpath_root.data_pyarrow
 
 def open_gzip_file(gzipfile, filename):
@@ -252,15 +244,13 @@ def open_gzip_file(gzipfile, filename):
 
 def write_json(
     output_file,
-    gzipfile,
     input_file,
     xpath_root,
     xpaths,
     processed,
-    output_format,
     rows_per_batch,
-    flat_attributes,
-    flat_elements,
+    gzipfile,
+    output_format,
 ):
 
     def write_xml_to_json(xml_file, processed):
@@ -271,7 +261,7 @@ def write_json(
         """
 
         for xml_arrow in parse_xml_file(
-            xml_file, xpath_root, xpaths, flat_attributes, flat_elements, rows_per_batch, full_schema=False
+            xml_file, xpath_root, xpaths, rows_per_batch
         ):
             while isinstance(xml_arrow, pa.ListArray):
                 xml_arrow = xml_arrow.flatten()
@@ -329,12 +319,15 @@ def write_parquet(
     input_file,
     xpath_root,
     xpaths,
-    schema_type,
     processed,
     rows_per_batch,
-    flat_attributes,
-    flat_elements,
 ):
+
+    ctx = df.SessionContext()
+    temp_dir = tempfile.gettempdir()
+
+    schema_type = convert_xpath_tree_to_schema_type(xpath_root, xpaths)
+    pyarrow_schema = pa.schema(schema_type)
 
     def write_xml_to_parquet(xml_file, processed):
         """
@@ -345,23 +338,27 @@ def write_parquet(
         """
 
         for xml_arrow in parse_xml_file(
-            xml_file, xpath_root, xpaths, flat_attributes, flat_elements, rows_per_batch, full_schema=True
+            xml_file, xpath_root, xpaths, rows_per_batch
         ):
             while isinstance(xml_arrow, pa.ListArray):
                 xml_arrow = xml_arrow.flatten()
 
+            xml_arrow = xml_arrow.cast(schema_type)
+
             table = pa.Table.from_struct_array(xml_arrow)
 
             if len(table) > 0:
-                writer.write_table(table)
+                #writer.write_table(table)
+                df_table = ctx.from_arrow(table)
+                temp_file = os.path.join(temp_dir, "temp_" + output_file)
+                df_table.write_parquet(temp_file)
+                new_table = pq.read_table(temp_file)
+                os.remove(temp_file)
+                writer.write_table(new_table)
+
                 processed = True
 
         return processed
-
-    if pa.types.is_struct(schema_type):
-        pyarrow_schema = pa.schema(schema_type)
-    else:
-        pyarrow_schema = pa.schema(schema_type.value_type)
 
     with pq.ParquetWriter(output_file, pyarrow_schema) as writer:
         if input_file.endswith(".tar.gz"):
@@ -392,7 +389,7 @@ def write_parquet(
 
 def convert_xml_file(
     xsd_file,
-    xml_file,
+    input_file,
     xml_path,
     output_file,
     output_path,
@@ -406,7 +403,7 @@ def convert_xml_file(
 ):
     """
     :param xsd_file: xsd file
-    :param xml_file: xml input file
+    :param input_file: xml input file
     :param xml_path: whether to parse a specific xml path
     :param output_format: jsonl or json
     :param output_file: output file
@@ -420,56 +417,59 @@ def convert_xml_file(
     xml_schema = xmlschema.XMLSchema11(xsd_file)
 
     xpath_root = convert_xsd_to_xpath_tree(xml_schema, max_recursion)
-
+   
     xpaths = None
     if xml_path:
         xpaths = xml_path.split("/")
         xpaths = xpaths[1:]
         xpath_root.trim_elements(xpaths)
 
-    _logger.info("Parsing " + xml_file)
+    xpath_root.reset_fields()
+
+    if flat_elements:
+        xpath_root.flatten_elements()
+
+    if flat_attributes:
+        xpath_root.flatten_attributes()
+
+    _logger.info("Parsing " + input_file)
     _logger.info("Writing to file " + output_file)
 
     if output_format in ["json", "jsonl"]:
         processed = write_json(
             output_file,
-            gzipfile,
-            xml_file,
+            input_file,
             xpath_root,
             xpaths,
             processed,
-            output_format,
             rows_per_batch,
-            flat_attributes,
-            flat_elements,
+            gzipfile,
+            output_format,
         )
 
     elif output_format in ["parquet"]:
 
-        schema_type = convert_xpath_tree_to_schema_type(xpath_root, xpaths, flat_attributes, flat_elements)
+        schema_type = convert_xpath_tree_to_schema_type(xpath_root, xpaths)
 
         processed = write_parquet(
             output_file,
-            xml_file,
+            input_file,
             xpath_root,
             xpaths,
-            schema_type,
             processed,
             rows_per_batch,
-            flat_attributes,
-            flat_elements,
         )
 
     # Remove output file if no data is generated
     if not processed:
         os.remove(output_file)
-        _logger.info("No data found in " + xml_file)
+        _logger.info("No data found in " + input_file)
         return
 
     if delete_xml:
         os.remove(input_file)
 
-    _logger.info("Completed " + xml_file)
+    _logger.info("Completed " + input_file)
 
 
 def convert_xml(
@@ -533,10 +533,6 @@ def convert_xml(
         matches = glob(pattern)
         if matches:
             expanded_files.extend(matches)
-        else:
-            # If no files match the pattern, keep the original string
-            # (useful for letting the application throw a 'File Not Found' error later)
-            expanded_files.append(pattern)
 
     file_list = list(dict.fromkeys(expanded_files))
     file_count = len(file_list)
