@@ -391,7 +391,7 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                 # add simple list of dict for attributes and elements
                 parent_xpath_elem = xpath_elem.add_child(
                     elem.local_name,
-                    True,
+                    False,
                     is_list,
                     True,
                     None,

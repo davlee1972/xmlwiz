@@ -198,7 +198,7 @@ def set_pyarrow_data(xpath_root, full_schema):
             )
             xpath_elem.data_pyarrow = data
 
-        if xpath_elem.is_list:
+        if xpath_elem.is_list and xpath_elem.data_pyarrow:
             if xpath_elem.data_offsets[-1] != xpath_elem.data_counter:
                 xpath_elem.data_offsets.append(xpath_elem.data_counter)
 
