@@ -228,6 +228,20 @@ def open_gzip_file(gzipfile, filename):
     else:
         return open(filename, "wb")
 
+def remove_none_nested(data):
+    if isinstance(data, dict):
+        # Recursively clean dictionaries and ignore None values
+        return {
+            k: remove_none_nested(v) 
+            for k, v in data.items() 
+            if v is not None
+        }
+    elif isinstance(data, list):
+        # Recursively clean lists if they contain nested dictionaries
+        return [remove_none_nested(item) for item in data if item is not None]
+    else:
+        return data
+
 def write_json(
     output_file,
     input_file,
@@ -253,6 +267,8 @@ def write_json(
                 xml_arrow = xml_arrow.flatten()
 
             pylist = xml_arrow.to_pylist()
+
+            pylist = remove_none_nested(pylist)
 
             for row in pylist:
                 xml_json = json.dumps(row, default=json_decoder)
