@@ -359,8 +359,8 @@ def write_parquet(
                 temp_file = os.path.join(temp_dir, "temp_" + output_file)
                 df_table.write_parquet(temp_file)
                 new_table = pq.read_table(temp_file)
-                os.remove(temp_file)
                 writer.write_table(new_table)
+                os.remove(temp_file)
 
                 processed = True
 
