@@ -116,7 +116,6 @@ class XmlElement:
             data[tuple(xpath_elem.xpaths)] = xpath_elem.data_vector
         return data
 
-
     def clear_data(self):
         for elem in self.iter_elem():
             elem.data_vector = []
@@ -128,7 +127,7 @@ class XmlElement:
         for elem in self.iter_elem():
             elem.field_name = elem.name
             elem.field_pyarrow_type = elem.pyarrow_type
-            elem.field_skip = False        
+            elem.field_skip = False
 
     def trim_elements(self, xpaths):
         # attributes and tail trimming is handled by removing parent element
@@ -154,7 +153,10 @@ class XmlElement:
 
     def flatten_elements(self):
         for xpath_elem in self.iter_elem():
-            if not xpath_elem.name.endswith("@attributes") and len(xpath_elem.children) == 1:
+            if (
+                not xpath_elem.name.endswith("@attributes")
+                and len(xpath_elem.children) == 1
+            ):
                 child, child_elem = next(iter(xpath_elem.children.items()))
                 if child.endswith("@attributes"):
                     return
@@ -168,9 +170,9 @@ class XmlElement:
                 xpath_elem.field_skip = True
                 # change name of all children
                 for child_elem in xpath_elem.children.values():
-                    child_elem.field_name = xpath_elem.name.removesuffix("attributes") + child_elem.name
-
-
+                    child_elem.field_name = (
+                        xpath_elem.name.removesuffix("attributes") + child_elem.name
+                    )
 
     # convert xpath element to pyarrow type
     def set_field_pyarrow_type(self):
@@ -191,10 +193,15 @@ class XmlElement:
 
                 # add in flattened attributes
                 attributes = xpath_elem.name + "@attributes"
-                if attributes in xpath_elem.children and xpath_elem.children[attributes].field_skip:
+                if (
+                    attributes in xpath_elem.children
+                    and xpath_elem.children[attributes].field_skip
+                ):
                     attributes_elem = xpath_elem.children[attributes]
                     attr_struct_fields = [
-                        pa.field(v.field_name, v.field_pyarrow_type, nullable=v.nullable)
+                        pa.field(
+                            v.field_name, v.field_pyarrow_type, nullable=v.nullable
+                        )
                         for v in attributes_elem.children.values()
                         if v.field_pyarrow_type
                     ]
@@ -547,7 +554,9 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
 
 def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
 
-    xpath_root = XmlElement("root", [], False, False, True, None, True, None, None, None)
+    xpath_root = XmlElement(
+        "root", [], False, False, True, None, True, None, None, None
+    )
 
     for elem in xsd_schema.elements.values():
         if not elem.is_global():
@@ -570,9 +579,7 @@ def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
     return xpath_root
 
 
-def convert_xpath_tree_to_schema_type(
-    xpath_root, xpaths=None
-):
+def convert_xpath_tree_to_schema_type(xpath_root, xpaths=None):
     xpath_root.set_field_pyarrow_type()
 
     if xpaths:
@@ -582,5 +589,5 @@ def convert_xpath_tree_to_schema_type(
 
     while pa.types.is_list(schema_type):
         schema_type = schema_type.value_type
-    
+
     return schema_type
