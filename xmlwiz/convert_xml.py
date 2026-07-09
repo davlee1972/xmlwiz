@@ -144,7 +144,6 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 if skip_xpath == current_xpaths:
                     skip = False
             else:
-
                 # fill in missing rows with nulls before adding new row
                 if xpath_elem.is_simple and not xpath_elem.is_list:
                     missing_rows = (
@@ -179,18 +178,27 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 if xpath_elem.children:
                     for child_elem in xpath_elem.children.values():
                         if child_elem.is_list:
-                            child_elem.data_offsets = child_elem.data_offsets + [None] * (xpath_elem.data_counter - len(child_elem.data_offsets)) + [child_elem.data_counter]
+                            child_elem.data_offsets = (
+                                child_elem.data_offsets
+                                + [None]
+                                * (
+                                    xpath_elem.data_counter
+                                    - len(child_elem.data_offsets)
+                                )
+                                + [child_elem.data_counter]
+                            )
 
                 if current_xpaths == xpaths:
                     rows_counter += 1
                     if xpaths and rows_per_batch and rows_counter == rows_per_batch:
-
                         cast_vector_data(xpath_root)
                         set_pyarrow_data(xpath_root, full_schema)
 
                         skip_check_elem = xpath_elem
                         while skip_check_elem.field_skip:
-                            skip_check_elem = next(iter(skip_check_elem.children.values()))
+                            skip_check_elem = next(
+                                iter(skip_check_elem.children.values())
+                            )
                         yield skip_check_elem.data_pyarrow
 
                         xpath_elem.clear_data()
@@ -211,11 +219,10 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 xpath_elem = next(iter(xpath_elem.children.values()))
             yield xpath_elem.data_pyarrow
     else:
-
         cast_vector_data(xpath_root)
         set_pyarrow_data(xpath_root, full_schema)
-
         yield xpath_root.data_pyarrow
+
 
 def open_gzip_file(gzipfile, filename):
     """
@@ -228,19 +235,17 @@ def open_gzip_file(gzipfile, filename):
     else:
         return open(filename, "wb")
 
+
 def remove_none_nested(data):
     if isinstance(data, dict):
         # Recursively clean dictionaries and ignore None values
-        return {
-            k: remove_none_nested(v) 
-            for k, v in data.items() 
-            if v is not None
-        }
+        return {k: remove_none_nested(v) for k, v in data.items() if v is not None}
     elif isinstance(data, list):
         # Recursively clean lists if they contain nested dictionaries
         return [remove_none_nested(item) for item in data if item is not None]
     else:
         return data
+
 
 def write_json(
     output_file,
@@ -260,9 +265,7 @@ def write_json(
         :return: data found and processed
         """
 
-        for xml_arrow in parse_xml_file(
-            xml_file, xpath_root, xpaths, rows_per_batch
-        ):
+        for xml_arrow in parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
             while isinstance(xml_arrow, pa.ListArray):
                 xml_arrow = xml_arrow.flatten()
 
@@ -345,13 +348,13 @@ def write_parquet(
             while isinstance(xml_arrow, pa.ListArray):
                 xml_arrow = xml_arrow.flatten()
 
-            #pyarrow cast has bugs so we have to add all missing columns in set_pyarrow_field for now
-            #xml_arrow = xml_arrow.cast(schema_type)
+            # pyarrow cast has bugs so we have to add all missing columns in set_pyarrow_field for now
+            # xml_arrow = xml_arrow.cast(schema_type)
 
             table = pa.Table.from_struct_array(xml_arrow)
 
             if len(table) > 0:
-                #writer.write_table(table)
+                # writer.write_table(table)
                 df_table = ctx.from_arrow(table)
                 temp_file = os.path.join(temp_dir, "temp_" + output_file)
                 df_table.write_parquet(temp_file)
@@ -420,7 +423,7 @@ def convert_xml_file(
     xml_schema = xmlschema.XMLSchema11(xsd_file)
 
     xpath_root = convert_xsd_to_xpath_tree(xml_schema, max_recursion)
-   
+
     xpaths = None
     if xml_path:
         xpaths = xml_path.split("/")
@@ -629,3 +632,106 @@ def convert_xml(
     if multi > 1:
         parse_queue_pool.close()
         parse_queue_pool.join()
+
+
+def to_pyarrow_batches(
+    xml_schema,
+    xml_file,
+    max_recursion=2,
+    flat_attributes=False,
+    flat_elements=False,
+    xml_path=None,
+    rows_per_batch=None,
+
+):
+    """
+    :param xml_schema: xml_schema
+    :param xml_file: xml file
+    :param xml_path: whether to parse a specific xml path
+    """
+
+    processed = False
+
+    xpath_root = convert_xsd_to_xpath_tree(xml_schema, max_recursion)
+
+    xpaths = None
+    if xml_path:
+        xpaths = xml_path.split("/")
+        xpaths = xpaths[1:]
+        xpath_root.trim_elements(xpaths)
+
+    xpath_root.reset_fields()
+
+    if flat_elements:
+        xpath_root.flatten_elements()
+
+    if flat_attributes:
+        xpath_root.flatten_attributes()
+
+    for xml_arrow in parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
+        while isinstance(xml_arrow, pa.ListArray):
+            xml_arrow = xml_arrow.flatten()
+        yield xml_arrow
+
+
+def to_pylist_batches(
+    xml_schema,
+    xml_file,
+    max_recursion=2,
+    flat_attributes=False,
+    flat_elements=False,
+    xml_path=None,
+    rows_per_batch=None,
+):
+
+    for xml_arrow in to_pyarrow_batches(
+        xml_schema,
+        xml_file,
+        max_recursion,
+        flat_attributes,
+        flat_elements,
+        xml_path,
+        rows_per_batch,
+    ):
+        pylist = xml_arrow.to_pylist()
+        pylist = remove_none_nested(pylist)
+
+        yield pylist
+
+def to_pyarrow(
+    xml_schema,
+    xml_file,
+    max_recursion=2,
+    flat_attributes=False,
+    flat_elements=False,
+    xml_path=None,
+):
+    for batch in to_pyarrow_batches(
+        xml_schema,
+        xml_file,
+        max_recursion,
+        flat_attributes,
+        flat_elements,
+        xml_path,
+        rows_per_batch=None,
+    ):
+        return batch
+
+def to_pylist(
+    xml_schema,
+    xml_file,
+    max_recursion=2,
+    flat_attributes=False,
+    flat_elements=False,
+    xml_path=None,
+):
+    for batch in to_pylist_batches(
+        xml_schema,
+        xml_file,
+        max_recursion,
+        flat_attributes,
+        flat_elements,
+        xml_path,
+        rows_per_batch=None,
+    ):
+        return batch

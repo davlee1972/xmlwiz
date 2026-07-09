@@ -24,6 +24,7 @@
 from enum import IntEnum
 import pyarrow as pa
 
+
 # compute expressions for element text to pyarrow
 # temporary enum will be replaced with a class that contains pyarrow.compute.Expression(s)
 class ComputeType(IntEnum):
