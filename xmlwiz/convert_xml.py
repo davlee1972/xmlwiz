@@ -47,8 +47,6 @@ import xmlschema
 from lxml import etree
 import datafusion as df
 
-from xmlwiz.mappings import ElementType
-
 from xmlwiz.xsd_to_pyarrow import (
     convert_xsd_to_xpath_tree,
     convert_xpath_tree_to_schema_type,
@@ -83,7 +81,7 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
+def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=False):
 
     xpath_elem = xpath_root
 
@@ -116,12 +114,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
                 skip = False
                 xpath_elem = xpath_elem.children[elem.tag]
                 xpath_elem.data_counter += 1
-                if xpath_elem.element_type in (
-                    ElementType.DICT,
-                    ElementType.LIST_OF_DICT,
-                    ElementType.SIMPLE_DICT,
-                    ElementType.SIMPLE_LIST_OF_DICT,
-                ):
+                if xpath_elem.is_dict:
                     if elem.attrib:
                         try:
                             attr_group = xpath_elem.children[elem.tag + "@attributes"]
@@ -153,7 +146,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
             else:
 
                 # fill in missing rows with nulls before adding new row
-                if xpath_elem.element_type == ElementType.SIMPLE:
+                if xpath_elem.is_simple and not xpath_elem.is_list:
                     missing_rows = (
                         xpath_elem.parent.data_counter - xpath_elem.data_counter
                     )
@@ -163,10 +156,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
 
                     xpath_elem.data_vector.append(elem.text)
 
-                elif xpath_elem.element_type in (
-                    ElementType.SIMPLE_DICT,
-                    ElementType.SIMPLE_LIST_OF_DICT,
-                ):
+                elif xpath_elem.is_simple and xpath_elem.is_dict:
                     xpath_elem.children[elem.tag].data_vector.append(elem.text)
                     xpath_elem.children[elem.tag].data_counter = xpath_elem.data_counter
 
@@ -188,11 +178,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
                 # add None offsets to track how many child rows are missing
                 if xpath_elem.children:
                     for child_elem in xpath_elem.children.values():
-                        if child_elem.element_type in (
-                            ElementType.SIMPLE_LIST_OF_DICT,
-                            ElementType.LIST_OF_DICT,
-                            ElementType.LIST,
-                        ):
+                        if child_elem.is_list:
                             child_elem.data_offsets = child_elem.data_offsets + [None] * (xpath_elem.data_counter - len(child_elem.data_offsets)) + [child_elem.data_counter]
 
                 if current_xpaths == xpaths:
@@ -200,7 +186,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
                     if xpaths and rows_per_batch and rows_counter == rows_per_batch:
 
                         cast_vector_data(xpath_root)
-                        set_pyarrow_data(xpath_root)
+                        set_pyarrow_data(xpath_root, full_schema)
 
                         skip_check_elem = xpath_elem
                         while skip_check_elem.field_skip:
@@ -218,7 +204,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
     if xpaths:
         if rows_counter > 0:
             cast_vector_data(xpath_root)
-            set_pyarrow_data(xpath_root)
+            set_pyarrow_data(xpath_root, full_schema)
 
             xpath_elem = xpath_root.find_elem(xpaths)
             while xpath_elem.field_skip:
@@ -227,7 +213,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
     else:
 
         cast_vector_data(xpath_root)
-        set_pyarrow_data(xpath_root)
+        set_pyarrow_data(xpath_root, full_schema)
 
         yield xpath_root.data_pyarrow
 
@@ -338,12 +324,13 @@ def write_parquet(
         """
 
         for xml_arrow in parse_xml_file(
-            xml_file, xpath_root, xpaths, rows_per_batch
+            xml_file, xpath_root, xpaths, rows_per_batch, full_schema=True
         ):
             while isinstance(xml_arrow, pa.ListArray):
                 xml_arrow = xml_arrow.flatten()
 
-            xml_arrow = xml_arrow.cast(schema_type)
+            #pyarrow cast has bugs so we have to add all missing columns in set_pyarrow_field for now
+            #xml_arrow = xml_arrow.cast(schema_type)
 
             table = pa.Table.from_struct_array(xml_arrow)
 
@@ -448,9 +435,6 @@ def convert_xml_file(
         )
 
     elif output_format in ["parquet"]:
-
-        schema_type = convert_xpath_tree_to_schema_type(xpath_root, xpaths)
-
         processed = write_parquet(
             output_file,
             input_file,

@@ -29,7 +29,6 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from xmlwiz.mappings import (
-    ElementType,
     ComputeType,
     XSD_TO_PYARROW,
     XSD_TO_COMPUTE_DECODE,
@@ -40,7 +39,9 @@ from xmlwiz.mappings import (
 class XmlElement:
     name: str
     xpaths: list
-    element_type: int
+    is_simple: bool
+    is_list: bool
+    is_dict: bool
     pyarrow_type: pa.DataType | None
     nullable: bool | None
     casting_exp: list[pc.Expression] | None
@@ -61,7 +62,9 @@ class XmlElement:
     def add_child(
         self,
         name,
-        element_type,
+        is_simple,
+        is_list,
+        is_dict,
         pyarrow_type,
         nullable,
         casting_exp,
@@ -71,7 +74,9 @@ class XmlElement:
         new_child = XmlElement(
             name,
             self.xpaths + [name],
-            element_type,
+            is_simple,
+            is_list,
+            is_dict,
             pyarrow_type,
             nullable,
             casting_exp,
@@ -120,12 +125,10 @@ class XmlElement:
             elem.data_pyarrow = None
 
     def reset_fields(self):
-        self.field_name = self.name
-        self.field_pyarrow_type = self.pyarrow_type
-        self.field_skip = False        
-
-        for child_elem in list(self.children.values()):
-            child_elem.reset_fields()
+        for elem in self.iter_elem():
+            elem.field_name = elem.name
+            elem.field_pyarrow_type = elem.pyarrow_type
+            elem.field_skip = False        
 
     def trim_elements(self, xpaths):
         # attributes and tail trimming is handled by removing parent element
@@ -179,13 +182,7 @@ class XmlElement:
                     xpath_elem.field_pyarrow_type = child_elem.field_pyarrow_type
                 continue
 
-            if xpath_elem.element_type in (
-                ElementType.DICT,
-                ElementType.LIST_OF_DICT,
-                ElementType.SIMPLE_DICT,
-                ElementType.SIMPLE_LIST_OF_DICT,
-            ):
-
+            if xpath_elem.is_dict:
                 struct_fields = [
                     pa.field(v.field_name, v.field_pyarrow_type, nullable=v.nullable)
                     for v in xpath_elem.children.values()
@@ -207,11 +204,7 @@ class XmlElement:
 
                 xpath_elem.field_pyarrow_type = pa.struct(struct_fields)
 
-            if xpath_elem.element_type in (
-                ElementType.LIST,
-                ElementType.LIST_OF_DICT,
-                ElementType.SIMPLE_LIST_OF_DICT
-            ):
+            if xpath_elem.is_list:
                 xpath_elem.field_pyarrow_type = pa.list_(xpath_elem.field_pyarrow_type)
 
 
@@ -348,6 +341,11 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
 
     nullable = elem.min_occurs == 0
 
+    if elem.max_occurs is None or elem.max_occurs > 1:
+        is_list = True
+    else:
+        is_list = False
+
     if elem.type.is_simple():
         pyarrow_type, casting_exp, validation_exp = map_xsd_simple_type_to_arrow(
             elem.type
@@ -355,12 +353,15 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
 
         xpath_elem.add_child(
             elem.local_name,
-            ElementType.SIMPLE,
+            True,
+            is_list,
+            False,
             pyarrow_type,
             nullable,
             casting_exp,
             validation_exp,
         )
+
     else:
         # 1. Process Attributes
         attr_fields = {}
@@ -387,44 +388,46 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                 elem.type
             )
             if attr_fields:
-                if elem.max_occurs is None or elem.max_occurs > 1:
-                    parent_xpath_elem = xpath_elem.add_child(
-                        elem.local_name,
-                        ElementType.SIMPLE_LIST_OF_DICT,
-                        None,
-                        nullable,
-                        None,
-                        None,
-                    )
-                else:
-                    parent_xpath_elem = xpath_elem.add_child(
-                        elem.local_name,
-                        ElementType.SIMPLE_DICT,
-                        None,
-                        nullable,
-                        None,
-                        None,
-                    )
+                # add simple list of dict for attributes and elements
+                parent_xpath_elem = xpath_elem.add_child(
+                    elem.local_name,
+                    True,
+                    is_list,
+                    True,
+                    None,
+                    nullable,
+                    None,
+                    None,
+                )
 
+                # add @attributes dict
                 attr_group_name = elem.local_name + "@attributes"
                 attr_group = parent_xpath_elem.add_child(
                     attr_group_name,
-                    ElementType.DICT,
+                    False,
+                    False,
+                    True,
                     None,
                     attributes_nullable,
                     None,
                     None,
                 )
+                # add attributes items as simple types
                 for attr_name, attr_values in attr_fields.items():
                     attr_group.add_child(
                         attr_name,
-                        ElementType.SIMPLE,
+                        True,
+                        False,
+                        False,
                         *attr_values,
                     )
 
+                # add simple type for element
                 parent_xpath_elem.add_child(
                     elem.local_name,
-                    ElementType.SIMPLE,
+                    True,
+                    False,
+                    False,
                     pyarrow_type,
                     nullable,
                     casting_exp,
@@ -432,60 +435,52 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                 )
 
             else:
-                if elem.max_occurs is None or elem.max_occurs > 1:
-                    parent_xpath_elem = xpath_elem.add_child(
-                        elem.local_name,
-                        ElementType.LIST,
-                        pyarrow_type,
-                        nullable,
-                        casting_exp,
-                        validation_exp,
-                    )
-                else:
-                    parent_xpath_elem = xpath_elem.add_child(
-                        elem.local_name,
-                        ElementType.SIMPLE,
-                        pyarrow_type,
-                        nullable,
-                        casting_exp,
-                        validation_exp,
-                    )
+                # simple type
+                parent_xpath_elem = xpath_elem.add_child(
+                    elem.local_name,
+                    True,
+                    is_list,
+                    False,
+                    pyarrow_type,
+                    nullable,
+                    casting_exp,
+                    validation_exp,
+                )
 
         # 3. Process Mixed and Complex Content
         elif elem.type.has_complex_content() or elem.type.has_mixed_content():
-            if elem.max_occurs is None or elem.max_occurs > 1:
-                parent_xpath_elem = xpath_elem.add_child(
-                    elem.local_name,
-                    ElementType.LIST_OF_DICT,
-                    None,
-                    nullable,
-                    None,
-                    None,
-                )
-            else:
-                parent_xpath_elem = xpath_elem.add_child(
-                    elem.local_name,
-                    ElementType.DICT,
-                    None,
-                    nullable,
-                    None,
-                    None,
-                )
+            # complex dict
+            parent_xpath_elem = xpath_elem.add_child(
+                elem.local_name,
+                False,
+                is_list,
+                True,
+                None,
+                nullable,
+                None,
+                None,
+            )
 
             if attr_fields:
+                # add @attributes dict
                 attr_group_name = elem.local_name + "@attributes"
                 attr_group = parent_xpath_elem.add_child(
                     attr_group_name,
-                    ElementType.DICT,
+                    False,
+                    False,
+                    True,
                     None,
                     attributes_nullable,
                     None,
                     None,
                 )
+                # add attributes items as simple types
                 for attr_name, attr_values in attr_fields.items():
                     attr_group.add_child(
                         attr_name,
-                        ElementType.SIMPLE,
+                        True,
+                        False,
+                        False,
                         *attr_values,
                     )
 
@@ -493,9 +488,12 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                 pyarrow_type, casting_exp, validation_exp = (
                     map_xsd_simple_type_to_arrow(elem.type)
                 )
+                # add simple type for element value
                 parent_xpath_elem.add_child(
                     elem.local_name,
-                    ElementType.SIMPLE,
+                    True,
+                    False,
+                    False,
                     pyarrow_type,
                     nullable,
                     casting_exp,
@@ -503,6 +501,7 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                 )
 
             if elem.type.has_complex_content() or elem.type.has_mixed_content():
+                # add complex child elements
                 child_counter = 0
                 for child_elem in elem.type.content.iter_elements():
                     old_recursion_check_list = recursion_check_list
@@ -528,10 +527,13 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
 
                     recursion_check_list = old_recursion_check_list
 
+                # add a simple type tail for every child element
                 if elem.type.has_mixed_content():
                     parent_xpath_elem.add_child(
                         child_elem.local_name + "@tail",
-                        ElementType.SIMPLE,
+                        True,
+                        False,
+                        False,
                         pa.string(),
                         nullable,
                         None,
@@ -545,7 +547,7 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
 
 def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
 
-    xpath_root = XmlElement("root", [], ElementType.DICT, None, True, None, None, None)
+    xpath_root = XmlElement("root", [], False, False, True, None, True, None, None, None)
 
     for elem in xsd_schema.elements.values():
         if not elem.is_global():

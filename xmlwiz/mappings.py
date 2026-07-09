@@ -24,22 +24,6 @@
 from enum import IntEnum
 import pyarrow as pa
 
-
-class ElementType(IntEnum):
-    SIMPLE = 1
-    # Simple types or simple content with no attributes and max_occurs = 1.
-    LIST = 2
-    # Complex item with simple content and no attributes and max_occurs > 1.
-    DICT = 3
-    # Complex item with complex or mixed content and max_occurs = 1.
-    LIST_OF_DICT = 4
-    # Complex item with complex or mixed content and max_occurs > 1.
-    SIMPLE_DICT = 5
-    # Complex item with simple content and attributes and max_occurs = 1.
-    SIMPLE_LIST_OF_DICT = 6
-    # Complex item with simple content and attributes and max_occurs = 1.
-
-
 # compute expressions for element text to pyarrow
 # temporary enum will be replaced with a class that contains pyarrow.compute.Expression(s)
 class ComputeType(IntEnum):
