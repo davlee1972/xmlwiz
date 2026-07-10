@@ -52,7 +52,7 @@ class XmlElement:
 
     field_name: str | None = None
     field_pyarrow_type: pa.DataType | None = field(default=None, repr=False)
-    field_skip: bool = False
+    field_flat: bool = False
 
     data_vector: list[str] = field(default_factory=list)
     data_offsets: list[int | None] = field(default_factory=lambda: [0])
@@ -125,7 +125,7 @@ class XmlElement:
                     "parent": item.parent.name if item.parent else None,
                     "children": item.children.keys(),
                     "field_name": item.field_name,
-                    "field_skip": item.field_skip,
+                    "field_flat": item.field_flat,
                 }
             )
         return elem_list
@@ -147,7 +147,7 @@ class XmlElement:
         for elem in self.iter_elem():
             elem.field_name = elem.name
             elem.field_pyarrow_type = elem.pyarrow_type
-            elem.field_skip = False
+            elem.field_flat = False
 
     def trim_elements(self, xpaths):
         # attributes and tail trimming is handled by removing parent element
@@ -174,7 +174,7 @@ class XmlElement:
     def flatten_attributes(self):
         for xpath_elem in self.iter_elem():
             if xpath_elem.name.endswith("@attributes"):
-                xpath_elem.field_skip = True
+                xpath_elem.field_flat = True
                 # add all child items as replacement
                 for child_elem in xpath_elem.children.values():
                     child_elem.field_name = (
@@ -195,7 +195,7 @@ class XmlElement:
                     if child == xpath_elem.name + "@attributes":
                         # add all child items
                         child_attributes = True
-                        if child_elem.field_skip:
+                        if child_elem.field_flat:
                             continue
                         else:
                             break
@@ -207,17 +207,17 @@ class XmlElement:
 
                 if child_attributes:
                     # add all child items as replacement
-                    xpath_elem.field_skip = True
+                    xpath_elem.field_flat = True
                 elif skip_to_elem:
                     # replace item with skip to element
-                    xpath_elem.field_skip = skip_to_elem
+                    xpath_elem.field_flat = skip_to_elem
 
     # convert xpath element to pyarrow type
     def set_field_pyarrow_type(self):
         # process data types in reverse. parent data types may be structs of child data types which in turn may also be structs.
         for xpath_elem in reversed(list(self.iter_elem())):
-            if xpath_elem.field_skip and xpath_elem.field_skip != True:
-                xpath_elem.field_pyarrow_type = xpath_elem.field_skip.field_pyarrow_type
+            if xpath_elem.field_flat and xpath_elem.field_flat != True:
+                xpath_elem.field_pyarrow_type = xpath_elem.field_flat.field_pyarrow_type
                 continue
 
             if (
@@ -231,8 +231,8 @@ class XmlElement:
                 # merge in skipped fields
                 struct_fields = []
                 for k, v in xpath_elem.children.items():
-                    if v.field_skip == True:
-                        struct_fields += list(v.field_pyarrow_type)
+                    if v.field_flat == True and not v.is_list:
+                        struct_fields += v.field_pyarrow_type.fields
                     else:
                         struct_fields.append(
                             pa.field(
@@ -615,10 +615,10 @@ def convert_xpath_tree_to_schema_type(xpath_root, xpaths=None):
     if xpaths:
         schema_type = xpath_root.find_elem(xpaths).field_pyarrow_type
     else:
-        if xpath_root.field_skip:
+        if xpath_root.field_flat:
             xpath_elem = xpath_root
-            while xpath_elem.field_skip:
-                xpath_elem = xpath_elem.field_skip
+            while xpath_elem.field_flat:
+                xpath_elem = xpath_elem.field_flat
             schema_type = xpath_elem.field_pyarrow_type
         else:
             schema_type = xpath_root.field_pyarrow_type
