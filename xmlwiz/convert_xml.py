@@ -119,7 +119,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 if xpath_elem.is_list:
                     # add missing offsets to match parent
                     if len(xpath_elem.data_offsets) != xpath_elem.parent.data_counter:
-                        xpath_elem.data_offsets = xpath_elem.data_offsets[:-1] + [None] (xpath_elem.parent.data_counter - len(xpath_elem.data_offsets)) + [xpath_elem.data_offsets[-1]]
+                        xpath_elem.data_offsets = xpath_elem.data_offsets[:-1] + [None] * (xpath_elem.parent.data_counter - len(xpath_elem.data_offsets)) + [xpath_elem.data_offsets[-1]]
                 else:
                     # current data counter is short compared to parent
                     if xpath_elem.data_counter != xpath_elem.parent.data_counter:
