@@ -184,7 +184,11 @@ class XmlElement:
                     xpath_elem.field_pyarrow_type = child_elem.field_pyarrow_type
                 continue
 
-            if xpath_elem.is_simple and not xpath_elem.is_dict and ComputeType.LIST in xpath_elem.casting_exp:
+            if (
+                xpath_elem.is_simple
+                and not xpath_elem.is_dict
+                and ComputeType.LIST in xpath_elem.casting_exp
+            ):
                 xpath_elem.field_pyarrow_type = pa.list_(xpath_elem.field_pyarrow_type)
 
             if xpath_elem.is_dict:
@@ -401,7 +405,7 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                 # add simple list of dict for attributes and elements
                 parent_xpath_elem = xpath_elem.add_child(
                     elem.local_name,
-                    False,
+                    True,
                     is_list,
                     True,
                     None,

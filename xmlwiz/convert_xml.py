@@ -84,7 +84,7 @@ def json_decoder(obj):
 def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=False):
 
     xpath_root.data_counter = 1
-    
+
     xpath_elem = xpath_root
 
     rows_counter = 0
@@ -119,13 +119,23 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 if xpath_elem.is_list:
                     # add missing offsets to match parent
                     if len(xpath_elem.data_offsets) != xpath_elem.parent.data_counter:
-                        xpath_elem.data_offsets = xpath_elem.data_offsets[:-1] + [None] * (xpath_elem.parent.data_counter - len(xpath_elem.data_offsets)) + [xpath_elem.data_offsets[-1]]
+                        xpath_elem.data_offsets = (
+                            xpath_elem.data_offsets[:-1]
+                            + [None]
+                            * (
+                                xpath_elem.parent.data_counter
+                                - len(xpath_elem.data_offsets)
+                            )
+                            + [xpath_elem.data_offsets[-1]]
+                        )
                 else:
                     # current data counter is short compared to parent
                     if xpath_elem.data_counter != xpath_elem.parent.data_counter:
                         # add missing rows as None
                         if xpath_elem.is_simple and not xpath_elem.is_dict:
-                            missing_rows = xpath_elem.parent.data_counter - xpath_elem.data_counter
+                            missing_rows = (
+                                xpath_elem.parent.data_counter - xpath_elem.data_counter
+                            )
                             if missing_rows:
                                 xpath_elem.data_vector.extend([None] * missing_rows)
                         # reset counter to match parent
@@ -139,7 +149,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                         if missing_rows:
                             child_elem.data_vector.extend([None] * missing_rows)
                             child_elem.data_counter = xpath_elem.data_counter
-                
+
                     if elem.tag + "@tail" in xpath_elem.children:
                         tail_elem = xpath_elem.children[elem.tag + "@tail"]
                         tail_elem.data_counter += 1
@@ -155,7 +165,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                             attr_group.data_counter = xpath_elem.data_counter
                             for attr_tag, attr_text in elem.attrib.items():
                                 attr_tag = etree.QName(attr_tag).localname
-                
+
                                 attribute = attr_group.children[attr_tag]
                                 attribute.data_counter += 1
                                 missing_rows = (
@@ -177,11 +187,10 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 if skip_xpath == current_xpaths:
                     skip = False
             else:
-
                 if xpath_elem.is_dict:
                     if xpath_elem.is_simple:
                         xpath_elem.children[elem.tag].data_vector.append(elem.text)
-                
+
                     if elem.tag + "@tail" in xpath_elem.children:
                         tail_elem = xpath_elem.children[elem.tag + "@tail"]
                         tail_elem.data_vector.append(elem.tail)
@@ -191,19 +200,23 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 # add offsets to track how many child rows belong to this list
                 if xpath_elem.children:
                     for child_elem in xpath_elem.children.values():
-                        if child_elem.is_list and child_elem.data_offsets [-1] != child_elem.data_counter:
+                        if (
+                            child_elem.is_list
+                            and child_elem.data_offsets[-1] != child_elem.data_counter
+                        ):
                             child_elem.data_offsets.append(child_elem.data_counter)
 
                 if current_xpaths == xpaths:
                     rows_counter += 1
                     if xpaths and rows_per_batch and rows_counter == rows_per_batch:
-
                         cast_vector_data(xpath_root)
                         set_pyarrow_data(xpath_root, full_schema)
 
                         skip_check_elem = xpath_elem
                         while skip_check_elem.field_skip:
-                            skip_check_elem = next(iter(skip_check_elem.children.values()))
+                            skip_check_elem = next(
+                                iter(skip_check_elem.children.values())
+                            )
                         yield skip_check_elem.data_pyarrow
 
                         xpath_elem.clear_data()
@@ -212,7 +225,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 xpath_elem = xpath_elem.parent
 
             elem.clear()
-            del current_xpaths [-1]
+            del current_xpaths[-1]
 
     if xpaths:
         if rows_counter > 0:
@@ -244,11 +257,17 @@ def open_gzip_file(gzipfile, filename):
 def remove_none_nested(data):
     if isinstance(data, dict):
         return {
-            k: cleaned_v for k, v in data.items() if (cleaned_v := remove_none_nested (v)) not in (None, {}, [])
-    }
+            k: cleaned_v
+            for k, v in data.items()
+            if (cleaned_v := remove_none_nested(v)) not in (None, {}, [])
+        }
     elif isinstance(data, list):
         # Recursively clean lists if they contain nested dictionaries
-        return [cleaned_item for item in data if (cleaned_item := remove_none_nested(item)) not in (None, {}, [])]
+        return [
+            cleaned_item
+            for item in data
+            if (cleaned_item := remove_none_nested(item)) not in (None, {}, [])
+        ]
     else:
         return data
 
@@ -648,7 +667,6 @@ def to_pyarrow_batches(
     flat_elements=False,
     xml_path=None,
     rows_per_batch=None,
-
 ):
     """
     :param xml_schema: xml_schema
@@ -704,6 +722,7 @@ def to_pylist_batches(
 
         yield pylist
 
+
 def to_pyarrow(
     xml_schema,
     xml_file,
@@ -722,6 +741,7 @@ def to_pyarrow(
         rows_per_batch=None,
     ):
         return batch
+
 
 def to_pylist(
     xml_schema,
