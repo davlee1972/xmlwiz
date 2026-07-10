@@ -120,6 +120,18 @@ def cast_vector_data(xpath_root):
                         xpath_elem.pyarrow_type
                     )
 
+                if not xpath_elem.is_list and xpath_elem.parent.data_counter != len(xpath_elem.data_pyarrow):
+                    xpath_elem.data_pyarrow = pa.concat_arrays(
+                        [
+                            xpath_elem.data_pyarrow,
+                            pa.nulls(
+                                xpath_elem.parent.data_counter - len(v.data_pyarrow),
+                                type=xpath_elem.pyarrow_type
+                            ),
+                        ]
+                    )
+
+
 
 def set_pyarrow_data(xpath_root, full_schema):
 
@@ -137,6 +149,13 @@ def set_pyarrow_data(xpath_root, full_schema):
             if full_schema:
                 for k, v in xpath_elem.children.items():
                     if v.data_pyarrow:
+                        if xpath_elem.data_counter != len(v.data_pyarrow):
+                            v.data_pyarrow = pa.concat_arrays(
+                                [
+                                    v.data_pyarrow,
+                                    pa.array([""] * (xpath_elem.data_counter - len(v.data_pyarrow)), type=v.data_pyarrow.type),
+                                ]
+                            )
                         if v.field_flat == True and not v.is_list:
                             data += v.data_pyarrow.flatten()
                             fields += v.data_pyarrow.type.fields
@@ -149,35 +168,32 @@ def set_pyarrow_data(xpath_root, full_schema):
                             )
                     else:
                         if v.field_flat == True and not v.is_list:
-                            data += pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type).flatten()
+                            data += pa.array([""] * xpath_elem.data_counter, type=v.field_pyarrow_type).flatten()
                             fields += v.field_pyarrow_type.fields
                         else:
-                            data.append(
-                                pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type)
-                            )
+                            if xpath_elem.is_simple and not xpath_elem.is_list:
+                                data.append(
+                                    pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type)
+                                )
+                            else:
+                                data.append(
+                                    pa.array([""] * xpath_elem.data_counter, type=v.field_pyarrow_type)
+                                )
                             fields.append(
                                 pa.field(
                                     v.field_name, v.field_pyarrow_type, nullable=v.nullable
                                 )
                             )
-
-                data = [
-                    row
-                    if len(row) == xpath_elem.data_counter
-                    else pa.concat_arrays(
-                        [
-                            row,
-                            pa.nulls(
-                                xpath_elem.data_counter - len(row),
-                                type=row.type,
-                            ),
-                        ]
-                    )
-                    for row in data
-                ]
             else:
                 for k, v in xpath_elem.children.items():
                     if v.data_pyarrow:
+                        if xpath_elem.data_counter != len(v.data_pyarrow):
+                            v.data_pyarrow = pa.concat_arrays(
+                                [
+                                    v.data_pyarrow,
+                                    pa.array([""] * (xpath_elem.data_counter - len(v.data_pyarrow)), type=v.data_pyarrow.type),
+                                ]
+                            )
                         if v.field_flat == True and not v.is_list:
                             data += v.data_pyarrow.flatten()
                             fields += v.data_pyarrow.type.fields
@@ -188,18 +204,6 @@ def set_pyarrow_data(xpath_root, full_schema):
                                     v.field_name, v.data_pyarrow.type, nullable=v.nullable
                                 )
                             )
-
-                data = [
-                    row
-                    if len(row) == xpath_elem.data_counter
-                    else pa.concat_arrays(
-                        [
-                            row,
-                            pa.nulls(xpath_elem.data_counter - len(row), type=row.type),
-                        ]
-                    )
-                    for row in data
-                ]
 
             data = pa.StructArray.from_arrays(arrays=data, fields=fields)
             xpath_elem.data_pyarrow = data
