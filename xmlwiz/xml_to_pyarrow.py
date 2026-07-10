@@ -154,34 +154,19 @@ def set_pyarrow_data(xpath_root):
             for k, v in xpath_elem.children.items():
                 if v.data_pyarrow:
                     if xpath_elem.data_counter != len(v.data_pyarrow):
-                        if v.is_dict:
-                            v.data_pyarrow = pa.concat_arrays(
-                                [
-                                    v.data_pyarrow,
-                                    pa.array(
-                                        [""]
-                                        * (
-                                            xpath_elem.data_counter
-                                            - len(v.data_pyarrow)
-                                        ),
-                                        type=v.data_pyarrow.type,
+                        v.data_pyarrow = pa.concat_arrays(
+                            [
+                                v.data_pyarrow,
+                                pa.array(
+                                    [None]
+                                    * (
+                                        xpath_elem.data_counter
+                                        - len(v.data_pyarrow)
                                     ),
-                                ]
-                            )
-                        else:
-                            v.data_pyarrow = pa.concat_arrays(
-                                [
-                                    v.data_pyarrow,
-                                    pa.array(
-                                        [None]
-                                        * (
-                                            xpath_elem.data_counter
-                                            - len(v.data_pyarrow)
-                                        ),
-                                        type=v.data_pyarrow.type,
-                                    ),
-                                ]
-                            )
+                                    type=v.data_pyarrow.type,
+                                ),
+                            ]
+                        )
                     if v.field_flat == True and not v.is_list:
                         data += v.data_pyarrow.flatten()
                         fields += v.data_pyarrow.type.fields
