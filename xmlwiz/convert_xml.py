@@ -81,7 +81,7 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=False):
+def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
 
     xpath_root.data_counter = 1
 
@@ -210,7 +210,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                     rows_counter += 1
                     if xpaths and rows_per_batch and rows_counter == rows_per_batch:
                         cast_vector_data(xpath_root)
-                        set_pyarrow_data(xpath_root, full_schema)
+                        set_pyarrow_data(xpath_root)
 
                         skip_check_elem = xpath_elem
                         while skip_check_elem.field_flat:
@@ -230,7 +230,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
     if xpaths:
         if rows_counter > 0:
             cast_vector_data(xpath_root)
-            set_pyarrow_data(xpath_root, full_schema)
+            set_pyarrow_data(xpath_root)
 
             xpath_elem = xpath_root.find_elem(xpaths)
             while xpath_elem.field_flat:
@@ -238,7 +238,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
             yield xpath_elem.data_pyarrow
     else:
         cast_vector_data(xpath_root)
-        set_pyarrow_data(xpath_root, full_schema)
+        set_pyarrow_data(xpath_root)
         yield xpath_root.data_pyarrow
 
 
@@ -367,14 +367,11 @@ def write_parquet(
         :return: data found and processed
         """
 
-        for xml_arrow in parse_xml_file(
-            xml_file, xpath_root, xpaths, rows_per_batch, full_schema=True
-        ):
+        for xml_arrow in parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
             while isinstance(xml_arrow, pa.ListArray):
                 xml_arrow = xml_arrow.flatten()
 
-            # pyarrow cast has bugs so we have to add all missing columns in set_pyarrow_field for now
-            # xml_arrow = xml_arrow.cast(schema_type)
+            xml_arrow = xml_arrow.cast(schema_type)
 
             table = pa.Table.from_struct_array(xml_arrow)
 
