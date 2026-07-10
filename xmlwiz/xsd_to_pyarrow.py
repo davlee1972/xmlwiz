@@ -184,7 +184,11 @@ class XmlElement:
                     xpath_elem.field_pyarrow_type = child_elem.field_pyarrow_type
                 continue
 
-            if xpath_elem.is_simple and not xpath_elem.is_dict and ComputeType.LIST in xpath_elem.casting_exp:
+            if (
+                xpath_elem.is_simple
+                and not xpath_elem.is_dict
+                and ComputeType.LIST in xpath_elem.casting_exp
+            ):
                 xpath_elem.field_pyarrow_type = pa.list_(xpath_elem.field_pyarrow_type)
 
             if xpath_elem.is_dict:
