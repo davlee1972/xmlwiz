@@ -136,25 +136,30 @@ def set_pyarrow_data(xpath_root, full_schema):
             fields = []
             if full_schema:
                 for k, v in xpath_elem.children.items():
-                    if v.field_skip == True:
-                        data += v.data_pyarrow.flatten()
-                        fields += v.data_pyarrow.type.fields
-                    elif v.data_pyarrow:
-                        data.append(v.data_pyarrow)
-                        fields.append(
-                            pa.field(
-                                v.field_name, v.data_pyarrow.type, nullable=v.nullable
+                    if v.data_pyarrow:
+                        if v.field_skip == True:
+                            data += v.data_pyarrow.flatten()
+                            fields += v.data_pyarrow.type.fields
+                        elif v.data_pyarrow:
+                            data.append(v.data_pyarrow)
+                            fields.append(
+                                pa.field(
+                                    v.field_name, v.data_pyarrow.type, nullable=v.nullable
+                                )
                             )
-                        )
                     else:
-                        data.append(
-                            pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type)
-                        )
-                        fields.append(
-                            pa.field(
-                                v.field_name, v.field_pyarrow_type, nullable=v.nullable
+                        if v.field_skip == True:
+                            data += pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type).flatten()
+                            fields += v.field_pyarrow_type.type.fields
+                        else:
+                            data.append(
+                                pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type)
                             )
-                        )
+                            fields.append(
+                                pa.field(
+                                    v.field_name, v.field_pyarrow_type, nullable=v.nullable
+                                )
+                            )
 
                 data = [
                     row
@@ -172,16 +177,17 @@ def set_pyarrow_data(xpath_root, full_schema):
                 ]
             else:
                 for k, v in xpath_elem.children.items():
-                    if v.field_skip == True:
-                        data += v.data_pyarrow.flatten()
-                        fields += v.data_pyarrow.type.fields
-                    elif v.data_pyarrow:
-                        data.append(v.data_pyarrow)
-                        fields.append(
-                            pa.field(
-                                v.field_name, v.data_pyarrow.type, nullable=v.nullable
+                    if v.data_pyarrow:
+                        if v.field_skip == True:
+                            data += v.data_pyarrow.flatten()
+                            fields += v.data_pyarrow.type.fields
+                        else:
+                            data.append(v.data_pyarrow)
+                            fields.append(
+                                pa.field(
+                                    v.field_name, v.data_pyarrow.type, nullable=v.nullable
+                                )
                             )
-                        )
 
                 data = [
                     row
