@@ -457,11 +457,11 @@ def convert_xml_file(
 
     xpath_root.reset_fields()
 
-    if flat_elements:
-        xpath_root.flatten_elements()
-
     if flat_attributes:
         xpath_root.flatten_attributes()
+
+    if flat_elements:
+        xpath_root.flatten_elements()
 
     _logger.info("Parsing " + input_file)
     _logger.info("Writing to file " + output_file)

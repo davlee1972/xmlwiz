@@ -105,9 +105,6 @@ def apply_facet(facet_name, vector, value):
 
 def cast_vector_data(xpath_root):
 
-    if xpath_root.data_counter == 0:
-        xpath_root.data_counter = 1
-
     for xpath_elem in xpath_root.iter_elem():
         if xpath_elem.data_vector:
             if xpath_elem.is_simple:
@@ -130,115 +127,75 @@ def set_pyarrow_data(xpath_root, full_schema):
         if xpath_elem.data_counter == 0 and not full_schema:
             continue
 
-        if xpath_elem.field_skip:
-            if not xpath_elem.name.endswith("@attributes"):
-                child_elem = next(iter(xpath_elem.children.values()))
-                xpath_elem.data_pyarrow = child_elem.data_pyarrow
+        if xpath_elem.field_skip and xpath_elem.field_skip != True:
+            xpath_elem.data_pyarrow = xpath_elem.field_skip.data_pyarrow
             continue
 
         if xpath_elem.is_dict:
+            data = []
+            fields = []
             if full_schema:
-                data = {
-                    k: pa.concat_arrays(
+                for k, v in xpath_elem.children.items():
+                    if v.field_skip == True:
+                        data += v.data_pyarrow.flatten()
+                        fields += v.data_pyarrow.type.fields
+                    elif v.data_pyarrow:
+                        data.append(v.data_pyarrow)
+                        fields.append(
+                            pa.field(
+                                v.field_name, v.data_pyarrow.type, nullable=v.nullable
+                            )
+                        )
+                    else:
+                        data.append(
+                            pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type)
+                        )
+                        fields.append(
+                            pa.field(
+                                v.field_name, v.field_pyarrow_type, nullable=v.nullable
+                            )
+                        )
+
+                data = [
+                    row
+                    if len(row) == xpath_elem.data_counter
+                    else pa.concat_arrays(
                         [
-                            v.data_pyarrow,
+                            row,
                             pa.nulls(
-                                xpath_elem.data_counter - len(v.data_pyarrow),
-                                type=v.field_pyarrow_type,
+                                xpath_elem.data_counter - len(row),
+                                type=row.type,
                             ),
                         ]
                     )
-                    if v.data_pyarrow
-                    else pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type)
-                    for k, v in xpath_elem.children.items()
-                    if not (v.field_skip and v.name == xpath_elem.name + "@attributes")
-                }
-                struct_fields = [
-                    pa.field(v.field_name, v.field_pyarrow_type, nullable=v.nullable)
-                    for v in xpath_elem.children.values()
-                    if not (v.field_skip and v.name == xpath_elem.name + "@attributes")
+                    for row in data
                 ]
             else:
-                data = {
-                    k: pa.concat_arrays(
+                for k, v in xpath_elem.children.items():
+                    if v.field_skip == True:
+                        data += v.data_pyarrow.flatten()
+                        fields += v.data_pyarrow.type.fields
+                    elif v.data_pyarrow:
+                        data.append(v.data_pyarrow)
+                        fields.append(
+                            pa.field(
+                                v.field_name, v.data_pyarrow.type, nullable=v.nullable
+                            )
+                        )
+
+                data = [
+                    row
+                    if len(row) == xpath_elem.data_counter
+                    else pa.concat_arrays(
                         [
-                            v.data_pyarrow,
-                            pa.nulls(
-                                xpath_elem.data_counter - len(v.data_pyarrow),
-                                type=v.data_pyarrow.type,
-                            ),
+                            row,
+                            pa.nulls(xpath_elem.data_counter - len(row), type=row.type),
                         ]
                     )
-                    for k, v in xpath_elem.children.items()
-                    if v.data_pyarrow
-                }
-
-                struct_fields = [
-                    pa.field(v.field_name, v.data_pyarrow.type, nullable=v.nullable)
-                    for v in xpath_elem.children.values()
-                    if v.data_pyarrow
+                    for row in data
                 ]
 
-            # add in flattened attributes
-            attributes = xpath_elem.name + "@attributes"
-            if (
-                attributes in xpath_elem.children
-                and xpath_elem.children[attributes].field_skip
-            ):
-                attributes_elem = xpath_elem.children[attributes]
-
-                if full_schema:
-                    attributes_data = {
-                        k: pa.concat_arrays(
-                            [
-                                v.data_pyarrow,
-                                pa.nulls(
-                                    xpath_elem.data_counter - len(v.data_pyarrow),
-                                    type=v.field_pyarrow_type,
-                                ),
-                            ]
-                        )
-                        if v.data_pyarrow
-                        else pa.nulls(
-                            xpath_elem.data_counter, type=v.field_pyarrow_type
-                        )
-                        for k, v in attributes_elem.children.items()
-                    }
-                    attr_struct_fields = [
-                        pa.field(
-                            v.field_name, v.field_pyarrow_type, nullable=v.nullable
-                        )
-                        for v in attributes_elem.children.values()
-                    ]
-                else:
-                    attributes_data = {
-                        k: pa.concat_arrays(
-                            [
-                                v.data_pyarrow,
-                                pa.nulls(
-                                    xpath_elem.data_counter - len(v.data_pyarrow),
-                                    type=v.data_pyarrow.type,
-                                ),
-                            ]
-                        )
-                        for k, v in attributes_elem.children.items()
-                        if v.data_pyarrow
-                    }
-                    attr_struct_fields = [
-                        pa.field(v.field_name, v.data_pyarrow.type, nullable=v.nullable)
-                        for v in attributes_elem.children.values()
-                        if v.data_pyarrow
-                    ]
-
-                if attributes_data:
-                    attributes_data.update(data)
-                    data = attributes_data
-                    attr_struct_fields.extend(struct_fields)
-                    struct_fields = attr_struct_fields
-
-            data = pa.StructArray.from_arrays(
-                arrays=data.values(), fields=struct_fields
-            )
+            data = pa.StructArray.from_arrays(arrays=data, fields=fields)
             xpath_elem.data_pyarrow = data
 
         if xpath_elem.is_list and xpath_elem.data_pyarrow:
@@ -252,4 +209,5 @@ def set_pyarrow_data(xpath_root, full_schema):
                 + [xpath_elem.data_offsets[-1]],
                 xpath_elem.data_pyarrow,
             )
+
             xpath_elem.data_pyarrow = data
