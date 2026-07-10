@@ -151,19 +151,6 @@ class XmlElement:
         if not all(a == b for a, b in zip(xpaths, self.xpaths)):
             self.parent.remove_child(self.name)
 
-    def flatten_elements(self):
-        for xpath_elem in self.iter_elem():
-            if (
-                not xpath_elem.name.endswith("@attributes")
-                and len(xpath_elem.children) == 1
-            ):
-                child, child_elem = next(iter(xpath_elem.children.items()))
-                if child.endswith("@attributes"):
-                    return
-                xpath_elem.field_skip = True
-                if not xpath_elem.nullable and child_elem.nullable:
-                    xpath_elem.nullable = True
-
     def flatten_attributes(self):
         for xpath_elem in self.iter_elem():
             if xpath_elem.name.endswith("@attributes"):
@@ -174,6 +161,19 @@ class XmlElement:
                         xpath_elem.name.removesuffix("attributes") + child_elem.name
                     )
 
+    def flatten_elements(self):
+        for xpath_elem in self.iter_elem():
+            if (
+                not xpath_elem.name.endswith("@attributes")
+                and len(xpath_elem.children) == 1
+            ):
+                child, child_elem = next(iter(xpath_elem.children.items()))
+                if child.endswith("@attributes"):
+                    return
+                xpath_elem.field_skip = True
+                xpath_elem.nullable = child_elem.nullable
+                xpath_elem.pyarrow_type = child_elem.pyarrow_type
+
     # convert xpath element to pyarrow type
     def set_field_pyarrow_type(self):
         # process data types in reverse. parent data types may be structs of child data types which in turn may also be structs.
@@ -183,6 +183,9 @@ class XmlElement:
                     child_elem = next(iter(xpath_elem.children.values()))
                     xpath_elem.field_pyarrow_type = child_elem.field_pyarrow_type
                 continue
+
+            if xpath_elem.is_simple and not xpath_elem.is_dict and ComputeType.LIST in xpath_elem.casting_exp:
+                xpath_elem.field_pyarrow_type = pa.list_(xpath_elem.field_pyarrow_type)
 
             if xpath_elem.is_dict:
                 struct_fields = [

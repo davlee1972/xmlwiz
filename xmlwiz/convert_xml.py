@@ -83,6 +83,8 @@ def json_decoder(obj):
 
 def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=False):
 
+    xpath_root.data_counter = 1
+    
     xpath_elem = xpath_root
 
     rows_counter = 0
@@ -114,14 +116,46 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 skip = False
                 xpath_elem = xpath_elem.children[elem.tag]
                 xpath_elem.data_counter += 1
+                if xpath_elem.is_list:
+                    # add missing offsets to match parent
+                    if len(xpath_elem.data_offsets) != xpath_elem.parent.data_counter:
+                        xpath_elem.data_offsets = xpath_elem.data_offsets[:-1] + [None] * (xpath_elem.parent.data_counter - len(xpath_elem.data_offsets)) + [xpath_elem.data_offsets[-1]]
+                else:
+                    # current data counter is short compared to parent
+                    if xpath_elem.data_counter != xpath_elem.parent.data_counter:
+                        # add missing rows as None
+                        if xpath_elem.is_simple and not xpath_elem.is_dict:
+                            missing_rows = xpath_elem.parent.data_counter - xpath_elem.data_counter
+                            if missing_rows:
+                                xpath_elem.data_vector.extend([None] * missing_rows)
+                        # reset counter to match parent
+                        xpath_elem.data_counter = xpath_elem.parent.data_counter
+
                 if xpath_elem.is_dict:
+                    if xpath_elem.is_simple:
+                        child_elem = xpath_elem.children[elem.tag]
+                        child_elem.data_counter += 1
+                        missing_rows = xpath_elem.data_counter - child_elem.data_counter
+                        if missing_rows:
+                            child_elem.data_vector.extend([None] * missing_rows)
+                            child_elem.data_counter = xpath_elem.data_counter
+                
+                    if elem.tag + "@tail" in xpath_elem.children:
+                        tail_elem = xpath_elem.children[elem.tag + "@tail"]
+                        tail_elem.data_counter += 1
+                        missing_rows = xpath_elem.data_counter - tail_elem.data_counter
+                        if missing_rows:
+                            tail_elem.data_vector.extend([None] * missing_rows)
+                            tail_elem.data_counter = xpath_elem.data_counter
+
                     if elem.attrib:
+                        # Lxml will include stuff like xlms and xsi items in attributes which we don't want.
                         try:
                             attr_group = xpath_elem.children[elem.tag + "@attributes"]
                             attr_group.data_counter = xpath_elem.data_counter
                             for attr_tag, attr_text in elem.attrib.items():
                                 attr_tag = etree.QName(attr_tag).localname
-
+                
                                 attribute = attr_group.children[attr_tag]
                                 attribute.data_counter += 1
                                 missing_rows = (
@@ -129,8 +163,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                                 )
                                 if missing_rows > 0:
                                     attribute.data_vector.extend([None] * missing_rows)
-                                    attribute.data_counter += missing_rows
-                                # attr_data = xml_to_python(v, attribute.element_type)
+                                    attribute.data_counter = attr_group.data_counter
                                 attribute.data_vector.append(attr_text)
                         except:
                             pass
@@ -144,61 +177,33 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 if skip_xpath == current_xpaths:
                     skip = False
             else:
-                # fill in missing rows with nulls before adding new row
-                if xpath_elem.is_simple and not xpath_elem.is_list:
-                    missing_rows = (
-                        xpath_elem.parent.data_counter - xpath_elem.data_counter
-                    )
-                    if missing_rows > 0:
-                        xpath_elem.data_vector.extend([None] * missing_rows)
-                        xpath_elem.data_counter += missing_rows
 
+                if xpath_elem.is_dict:
+                    if xpath_elem.is_simple:
+                        xpath_elem.children[elem.tag].data_vector.append(elem.text)
+                
+                    if elem.tag + "@tail" in xpath_elem.children:
+                        tail_elem = xpath_elem.children[elem.tag + "@tail"]
+                        tail_elem.data_vector.append(elem.tail)
+                elif xpath_elem.is_simple:
                     xpath_elem.data_vector.append(elem.text)
 
-                elif xpath_elem.is_simple and xpath_elem.is_dict:
-                    xpath_elem.children[elem.tag].data_vector.append(elem.text)
-                    xpath_elem.children[elem.tag].data_counter = xpath_elem.data_counter
-
-                if elem.tail:
-                    try:
-                        tail_elem = xpath_elem.children[elem.tag + "@tail"]
-                        missing_rows = (
-                            tail_elem.data_counter - xpath_elem.data_counter + 1
-                        )
-                        if missing_rows > 0:
-                            tail_elem.data_vector.extend([None] * missing_rows)
-                            tail_elem.data_counter += missing_rows
-                        tail_elem.data_vector.append(elem.tail)
-                        tail_elem.data_counter = xpath_elem.data_counter
-                    except:
-                        pass
-
                 # add offsets to track how many child rows belong to this list
-                # add None offsets to track how many child rows are missing
                 if xpath_elem.children:
                     for child_elem in xpath_elem.children.values():
-                        if child_elem.is_list:
-                            child_elem.data_offsets = (
-                                child_elem.data_offsets
-                                + [None]
-                                * (
-                                    xpath_elem.data_counter
-                                    - len(child_elem.data_offsets)
-                                )
-                                + [child_elem.data_counter]
-                            )
+                        if child_elem.is_list and child_elem.data_offsets [-1] != child_elem.data_counter:
+                            child_elem.data_offsets.append(child_elem.data_counter)
 
                 if current_xpaths == xpaths:
                     rows_counter += 1
                     if xpaths and rows_per_batch and rows_counter == rows_per_batch:
+
                         cast_vector_data(xpath_root)
                         set_pyarrow_data(xpath_root, full_schema)
 
                         skip_check_elem = xpath_elem
                         while skip_check_elem.field_skip:
-                            skip_check_elem = next(
-                                iter(skip_check_elem.children.values())
-                            )
+                            skip_check_elem = next(iter(skip_check_elem.children.values()))
                         yield skip_check_elem.data_pyarrow
 
                         xpath_elem.clear_data()
@@ -207,7 +212,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                 xpath_elem = xpath_elem.parent
 
             elem.clear()
-            del current_xpaths[-1]
+            del current_xpaths [-1]
 
     if xpaths:
         if rows_counter > 0:
@@ -238,11 +243,12 @@ def open_gzip_file(gzipfile, filename):
 
 def remove_none_nested(data):
     if isinstance(data, dict):
-        # Recursively clean dictionaries and ignore None values
-        return {k: remove_none_nested(v) for k, v in data.items() if v is not None}
+        return {
+            k: cleaned_v for k, v in data.items() if (cleaned_v := remove_none_nested (v)) not in (None, {}, [])
+    }
     elif isinstance(data, list):
         # Recursively clean lists if they contain nested dictionaries
-        return [remove_none_nested(item) for item in data if item is not None]
+        return [cleaned_item for item in data if (cleaned_item := remove_none_nested(item)) not in (None, {}, [])]
     else:
         return data
 
