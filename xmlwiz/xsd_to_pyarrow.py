@@ -180,6 +180,7 @@ class XmlElement:
                     child_elem.field_name = (
                         xpath_elem.name.removesuffix("attributes") + child_elem.name
                     )
+                    child_elem.nullale = xpath_elem.nullable
 
     def flatten_elements(self):
         for xpath_elem in self.iter_elem():
