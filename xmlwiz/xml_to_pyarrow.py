@@ -127,8 +127,8 @@ def set_pyarrow_data(xpath_root, full_schema):
         if xpath_elem.data_counter == 0 and not full_schema:
             continue
 
-        if xpath_elem.field_skip and xpath_elem.field_skip != True:
-            xpath_elem.data_pyarrow = xpath_elem.field_skip.data_pyarrow
+        if xpath_elem.field_flat and xpath_elem.field_flat != True:
+            xpath_elem.data_pyarrow = xpath_elem.field_flat.data_pyarrow
             continue
 
         if xpath_elem.is_dict:
@@ -137,7 +137,7 @@ def set_pyarrow_data(xpath_root, full_schema):
             if full_schema:
                 for k, v in xpath_elem.children.items():
                     if v.data_pyarrow:
-                        if v.field_skip == True:
+                        if v.field_flat == True and not v.is_list:
                             data += v.data_pyarrow.flatten()
                             fields += v.data_pyarrow.type.fields
                         elif v.data_pyarrow:
@@ -148,9 +148,9 @@ def set_pyarrow_data(xpath_root, full_schema):
                                 )
                             )
                     else:
-                        if v.field_skip == True:
+                        if v.field_flat == True and not v.is_list:
                             data += pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type).flatten()
-                            fields += v.field_pyarrow_type.type.fields
+                            fields += v.field_pyarrow_type.fields
                         else:
                             data.append(
                                 pa.nulls(xpath_elem.data_counter, type=v.field_pyarrow_type)
@@ -178,7 +178,7 @@ def set_pyarrow_data(xpath_root, full_schema):
             else:
                 for k, v in xpath_elem.children.items():
                     if v.data_pyarrow:
-                        if v.field_skip == True:
+                        if v.field_flat == True and not v.is_list:
                             data += v.data_pyarrow.flatten()
                             fields += v.data_pyarrow.type.fields
                         else:

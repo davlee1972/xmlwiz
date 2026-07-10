@@ -213,7 +213,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
                         set_pyarrow_data(xpath_root, full_schema)
 
                         skip_check_elem = xpath_elem
-                        while skip_check_elem.field_skip:
+                        while skip_check_elem.field_flat:
                             skip_check_elem = next(
                                 iter(skip_check_elem.children.values())
                             )
@@ -233,7 +233,7 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch, full_schema=Fal
             set_pyarrow_data(xpath_root, full_schema)
 
             xpath_elem = xpath_root.find_elem(xpaths)
-            while xpath_elem.field_skip:
+            while xpath_elem.field_flat:
                 xpath_elem = next(iter(xpath_elem.children.values()))
             yield xpath_elem.data_pyarrow
     else:
