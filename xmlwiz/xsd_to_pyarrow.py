@@ -25,6 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Iterator
+
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -52,7 +54,7 @@ class XmlElement:
 
     field_name: str | None = None
     field_pyarrow_type: pa.DataType | None = field(default=None, repr=False)
-    field_flat: bool = False
+    field_flat: bool | XmlElement = False
 
     data_vector: list[str] = field(default_factory=list)
     data_offsets: list[int | None] = field(default_factory=lambda: [0])
@@ -61,15 +63,42 @@ class XmlElement:
 
     def add_child(
         self,
-        name,
-        is_simple,
-        is_list,
-        is_dict,
-        pyarrow_type,
-        nullable,
-        casting_exp,
-        validation_exp,
+        name: str,
+        is_simple: bool,
+        is_list: bool,
+        is_dict: bool,
+        pyarrow_type: pa.DataType | None,
+        nullable: bool | None,
+        casting_exp: list[pc.Expression] | None,
+        validation_exp: list[pc.Expression] | None,
     ) -> XmlElement:
+        """
+        Create and attach a child XmlElement.
+
+        Parameters
+        ----------
+        name : str
+            Name of the child element.
+        is_simple : bool
+            Whether the child is a simple value.
+        is_list : bool
+            Whether the child represents a list of values.
+        is_dict : bool
+            Whether the child represents a dictionary structure.
+        pyarrow_type : pyarrow.DataType or None
+            Target Arrow data type.
+        nullable : bool or None
+            Whether the child is nullable.
+        casting_exp : list[pyarrow.compute.Expression] or None
+            Optional casting expressions.
+        validation_exp : list[pyarrow.compute.Expression] or None
+            Optional validation expressions.
+
+        Returns
+        -------
+        XmlElement
+            Newly created child element.
+        """
 
         new_child = XmlElement(
             name,
@@ -87,18 +116,47 @@ class XmlElement:
         self.children[name] = new_child
         return new_child
 
-    def remove_child(self, name):
+    def remove_child(self, name: str) -> None:
+        """
+        Remove a named child element and all its descendants.
+
+        Parameters
+        ----------
+        name : str
+            Name of the child element to remove.
+        """
         if self.children[name].children:
             for child_name in list(self.children[name].children):
                 self.children[name].remove_child(child_name)
         del self.children[name]
 
-    def iter_elem(self):
+    def iter_elem(self) -> Iterator[XmlElement]:
+        """
+        Iterate over this element and all descendants.
+
+        Yields
+        ------
+        XmlElement
+            Each XmlElement in the tree.
+        """
         yield self
         for child_elem in self.children.values():
             yield from child_elem.iter_elem()
 
-    def find_elem(self, xml_path):
+    def find_elem(self, xml_path: str | list[str]) -> XmlElement | None:
+        """
+        Find an element by XPath path segments.
+
+        Parameters
+        ----------
+        xml_path : str or list[str]
+            XPath path string or list of segments.
+
+        Returns
+        -------
+        XmlElement or None
+            Matching XmlElement if found.
+        """
 
         if isinstance(xml_path, str):
             xpaths = xml_path.split("/")
@@ -110,7 +168,15 @@ class XmlElement:
             if xpath_elem.xpaths == xpaths:
                 return xpath_elem
 
-    def display_tree(self):
+    def display_tree(self) -> list[dict[str, Any]]:
+        """
+        Return a serializable representation of the XML element tree.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            List of element metadata dictionaries.
+        """
         elem_list = []
         for item in self.iter_elem():
             elem_list.append(
@@ -130,26 +196,48 @@ class XmlElement:
             )
         return elem_list
 
-    def get_data_vector(self):
+    def get_data_vector(self) -> dict[tuple[str, ...], list[str]]:
+        """
+        Return a mapping of XPath tuples to element data vectors.
+
+        Returns
+        -------
+        dict[tuple[str, ...], list[str]]
+            Mapping of XPath segment tuples to data vectors.
+        """
         data = {}
         for xpath_elem in self.iter_elem():
             data[tuple(xpath_elem.xpaths)] = xpath_elem.data_vector
         return data
 
-    def clear_data(self):
+    def clear_data(self) -> None:
+        """
+        Reset runtime data on every element in the tree.
+        """
         for elem in self.iter_elem():
             elem.data_vector = []
             elem.data_offsets = [0]
             elem.data_counter = 0
             elem.data_pyarrow = None
 
-    def reset_fields(self):
+    def reset_fields(self) -> None:
+        """
+        Reset field metadata for every element in the tree.
+        """
         for elem in self.iter_elem():
             elem.field_name = elem.name
             elem.field_pyarrow_type = elem.pyarrow_type
             elem.field_flat = False
 
-    def trim_elements(self, xpaths):
+    def trim_elements(self, xpaths: list[str]) -> None:
+        """
+        Remove non-matching child elements based on a specific XPath.
+
+        Parameters
+        ----------
+        xpaths : list[str]
+            XPath segments to keep.
+        """
         # attributes and tail trimming is handled by removing parent element
         try:
             if self.xpaths[-1].endswith("@attributes") or self.xpaths[-1].endswith(
@@ -171,7 +259,10 @@ class XmlElement:
         if not all(a == b for a, b in zip(xpaths, self.xpaths)):
             self.parent.remove_child(self.name)
 
-    def flatten_attributes(self):
+    def flatten_attributes(self) -> None:
+        """
+        Flatten attribute groups into their parent elements.
+        """
         for xpath_elem in self.iter_elem():
             if xpath_elem.name.endswith("@attributes"):
                 xpath_elem.field_flat = True
@@ -182,7 +273,10 @@ class XmlElement:
                     )
                     child_elem.nullable = xpath_elem.parent.nullable
 
-    def flatten_elements(self):
+    def flatten_elements(self) -> None:
+        """
+        Flatten elements with a single child into their child element.
+        """
         for xpath_elem in self.iter_elem():
             if xpath_elem.name.endswith("@attributes"):
                 continue
@@ -214,7 +308,12 @@ class XmlElement:
                     xpath_elem.field_flat = skip_to_elem
 
     # convert xpath element to pyarrow type
-    def set_field_pyarrow_type(self):
+    def set_field_pyarrow_type(self) -> None:
+        """
+        Set the PyArrow type for each field in the tree.
+
+        This method resolves nested structs and list types recursively.
+        """
         # process data types in reverse. parent data types may be structs of child data types which in turn may also be structs.
         for xpath_elem in reversed(list(self.iter_elem())):
             if xpath_elem.field_flat and xpath_elem.field_flat != True:
@@ -246,7 +345,20 @@ class XmlElement:
                 xpath_elem.field_pyarrow_type = pa.list_(xpath_elem.field_pyarrow_type)
 
 
-def pyarrow_numeric(xsd_type):
+def pyarrow_numeric(xsd_type: Any) -> pa.DataType:
+    """
+    Determine the numeric PyArrow type for an XSD numeric restriction.
+
+    Parameters
+    ----------
+    xsd_type : Any
+        XSD type object to inspect.
+
+    Returns
+    -------
+    pyarrow.DataType
+        Appropriate Arrow numeric type.
+    """
     facets = {}
     if xsd_type.is_restriction():
         local_name = xsd_type.base_type.local_name
@@ -340,7 +452,20 @@ def pyarrow_numeric(xsd_type):
         return pa.int64()
 
 
-def map_xsd_simple_type_to_arrow(xsd_type):
+def map_xsd_simple_type_to_arrow(xsd_type: Any) -> tuple[pa.DataType, list[ComputeType], list[pc.Expression]]:
+    """
+    Map a simple XSD type to an Arrow type and casting expressions.
+
+    Parameters
+    ----------
+    xsd_type : Any
+        XSD type object.
+
+    Returns
+    -------
+    tuple[pyarrow.DataType, list[ComputeType], list[pyarrow.compute.Expression]
+        The Arrow type, casting expressions, and validation expressions.
+    """
     # returns
     # pyarrow_type pyarrow type to transform from element text or python type
     # casting exp - pyarrow compute expressions to cast string to pyarrow types
@@ -375,7 +500,26 @@ def map_xsd_simple_type_to_arrow(xsd_type):
     )
 
 
-def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
+def convert_xsd_elem(
+    elem: Any,
+    xpath_elem: XmlElement,
+    max_recursion: int,
+    recursion_check_list: list[str],
+) -> None:
+    """
+    Convert an XSD element into an XPath tree node.
+
+    Parameters
+    ----------
+    elem : Any
+        XSD element object.
+    xpath_elem : XmlElement
+        Current tree node to attach children to.
+    max_recursion : int
+        Maximum recursion depth for repeated complex types.
+    recursion_check_list : list[str]
+        Recursion tracking list of complex type names.
+    """
 
     nullable = elem.min_occurs == 0
 
@@ -583,7 +727,22 @@ def convert_xsd_elem(elem, xpath_elem, max_recursion, recursion_check_list):
                     xpath_elem.remove_child(elem.local_name)
 
 
-def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
+def convert_xsd_to_xpath_tree(xsd_schema: Any, max_recursion: int = 2) -> XmlElement:
+    """
+    Build an XPath tree representation from an XSD schema.
+
+    Parameters
+    ----------
+    xsd_schema : Any
+        Parsed XSD schema object.
+    max_recursion : int, default 2
+        Maximum recursion depth for repeated complex types.
+
+    Returns
+    -------
+    XmlElement
+        Root of the generated XPath tree.
+    """
 
     xpath_root = XmlElement(
         "root", [], False, False, True, None, True, None, None, None
@@ -610,7 +769,25 @@ def convert_xsd_to_xpath_tree(xsd_schema, max_recursion=2):
     return xpath_root
 
 
-def convert_xpath_tree_to_schema_type(xpath_root, xpaths=None):
+def convert_xpath_tree_to_schema_type(
+    xpath_root: XmlElement,
+    xpaths: list[str] | None = None,
+) -> pa.DataType:
+    """
+    Convert an XPath tree into a PyArrow schema type.
+
+    Parameters
+    ----------
+    xpath_root : XmlElement
+        Root of the XPath tree.
+    xpaths : list[str] or None, default None
+        Optional specific XPath path to use for the schema.
+
+    Returns
+    -------
+    pyarrow.DataType
+        Schema type produced from the XPath tree.
+    """
     xpath_root.set_field_pyarrow_type()
 
     if xpaths:

@@ -22,11 +22,14 @@
 # SOFTWARE.
 
 
+from __future__ import annotations
+
 import os
 import sys
 import subprocess
 from multiprocessing import Pool
 import logging
+from typing import Any, IO, Iterator
 
 from datetime import datetime, date, time, timedelta
 import decimal
@@ -48,6 +51,7 @@ from lxml import etree
 import datafusion as df
 
 from xmlwiz.xsd_to_pyarrow import (
+    XmlElement,
     convert_xsd_to_xpath_tree,
     convert_xpath_tree_to_schema_type,
 )
@@ -58,11 +62,24 @@ _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-def json_decoder(obj):
+def json_decoder(obj: Any) -> Any:
     """
-    :param obj: python data
-    :return: converted type
-    :raises:
+    Decode Python objects into JSON serializable values.
+
+    Parameters
+    ----------
+    obj : Any
+        Python object to convert.
+
+    Returns
+    -------
+    Any
+        JSON serializable value.
+
+    Raises
+    ------
+    TypeError
+        If the object is not serializable.
     """
     if isinstance(obj, decimal.Decimal):
         return float(obj)
@@ -81,7 +98,31 @@ def json_decoder(obj):
     raise TypeError(repr(obj) + ":" + str(type(obj)) + " is not JSON serializable")
 
 
-def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
+def parse_xml_file(
+    xml_file: str | bytes | IO[bytes] | IO[str],
+    xpath_root: XmlElement,
+    xpaths: list[str] | None,
+    rows_per_batch: int | None,
+) -> Iterator[pa.Array]:
+    """
+    Parse XML data and yield batches of PyArrow arrays.
+
+    Parameters
+    ----------
+    xml_file : str or file-like
+        Path or file-like object containing XML data.
+    xpath_root : XmlElement
+        Root of the XPath tree used for parsing.
+    xpaths : list[str] or None
+        XPath path segments to parse.
+    rows_per_batch : int or None
+        Number of rows to process per batch.
+
+    Yields
+    ------
+    pyarrow.Array
+        Parsed batch of Arrow data.
+    """
 
     xpath_root.data_counter = 1
 
@@ -242,11 +283,21 @@ def parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
         yield xpath_root.data_pyarrow
 
 
-def open_gzip_file(gzipfile, filename):
+def open_gzip_file(gzipfile: bool, filename: str) -> IO[bytes]:
     """
-    :param gzipfile: whether to open a new file using gzip
-    :param filename: name of new file
-    :return: file handlers
+    Open an output file with optional gzip compression.
+
+    Parameters
+    ----------
+    gzipfile : bool
+        Whether to gzip the output file.
+    filename : str
+        Output filename.
+
+    Returns
+    -------
+    io.BufferedWriter
+        Opened binary file handle.
     """
     if gzipfile:
         return gzip.open(filename, "wb")
@@ -254,7 +305,20 @@ def open_gzip_file(gzipfile, filename):
         return open(filename, "wb")
 
 
-def remove_none_nested(data):
+def remove_none_nested(data: Any) -> Any:
+    """
+    Remove None, empty dict, and empty list values recursively.
+
+    Parameters
+    ----------
+    data : Any
+        Nested data structure.
+
+    Returns
+    -------
+    Any
+        Cleaned data with empty values removed.
+    """
     if isinstance(data, dict):
         return {
             k: cleaned_v
@@ -273,21 +337,33 @@ def remove_none_nested(data):
 
 
 def write_json(
-    output_file,
-    input_file,
-    xpath_root,
-    xpaths,
-    processed,
-    rows_per_batch,
-    gzipfile,
-    output_format,
-):
+    output_file: str,
+    input_file: str,
+    xpath_root: XmlElement,
+    xpaths: list[str] | None,
+    processed: bool,
+    rows_per_batch: int | None,
+    gzipfile: bool,
+    output_format: str,
+) -> bool:
 
-    def write_xml_to_json(xml_file, processed):
+    def write_xml_to_json(
+        xml_file: str | bytes | IO[bytes] | IO[str], processed: bool
+    ) -> bool:
         """
-        :param xml_file: xml file
-        :param processed: whether data has been found and processed
-        :return: data found and processed
+        Convert XML data from a file-like object to JSON output.
+
+        Parameters
+        ----------
+        xml_file : str or file-like
+            XML input path or file-like object.
+        processed : bool
+            Whether data has already been written.
+
+        Returns
+        -------
+        bool
+            Whether any data has been written.
         """
 
         for xml_arrow in parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
@@ -345,13 +421,13 @@ def write_json(
 
 
 def write_parquet(
-    output_file,
-    input_file,
-    xpath_root,
-    xpaths,
-    processed,
-    rows_per_batch,
-):
+    output_file: str,
+    input_file: str,
+    xpath_root: XmlElement,
+    xpaths: list[str] | None,
+    processed: bool,
+    rows_per_batch: int | None,
+) -> bool:
 
     ctx = df.SessionContext()
     temp_dir = tempfile.gettempdir()
@@ -359,12 +435,23 @@ def write_parquet(
     schema_type = convert_xpath_tree_to_schema_type(xpath_root, xpaths)
     pyarrow_schema = pa.schema(schema_type)
 
-    def write_xml_to_parquet(xml_file, processed):
+    def write_xml_to_parquet(
+        xml_file: str | bytes | IO[bytes] | IO[str], processed: bool
+    ) -> bool:
         """
-        :param xml_file: xml file
-        :param pyarrow_schema: PyArrow schema
-        :param processed: whether data has been found and processed
-        :return: data found and processed
+        Convert XML data from a file-like object into Parquet output.
+
+        Parameters
+        ----------
+        xml_file : str or file-like
+            XML input path or file-like object.
+        processed : bool
+            Whether any data has already been written.
+
+        Returns
+        -------
+        bool
+            Whether any data has been written.
         """
 
         for xml_arrow in parse_xml_file(xml_file, xpath_root, xpaths, rows_per_batch):
@@ -416,28 +503,48 @@ def write_parquet(
 
 
 def convert_xml_file(
-    xsd_file,
-    input_file,
-    xml_path,
-    output_file,
-    output_path,
-    max_recursion=2,
-    rows_per_batch=None,
-    output_format="jsonl",
-    gzipfile=False,
-    delete_xml=False,
-    flat_attributes=False,
-    flat_elements=False,
-):
+    xsd_file: str,
+    input_file: str,
+    xml_path: str | None,
+    output_file: str,
+    output_path: str | None,
+    max_recursion: int = 2,
+    rows_per_batch: int | None = None,
+    output_format: str = "jsonl",
+    gzipfile: bool = False,
+    delete_xml: bool = False,
+    flat_attributes: bool = False,
+    flat_elements: bool = False,
+) -> None:
     """
-    :param xsd_file: xsd file
-    :param input_file: xml input file
-    :param xml_path: whether to parse a specific xml path
-    :param output_format: jsonl or json
-    :param output_file: output file
-    :param output_path: directory to save file
-    :param gzipfile: gzip saved file
-    :param delete_xml: optional delete xml file after converting
+    Convert a single XML file to JSON or Parquet output.
+
+    Parameters
+    ----------
+    xsd_file : str
+        Path to the XSD schema file.
+    input_file : str
+        XML input file path.
+    xml_path : str or None
+        Specific XML path to parse.
+    output_file : str
+        Output file path.
+    output_path : str or None
+        Directory to save the output file.
+    max_recursion : int, default 2
+        Maximum recursion depth for converting schema elements.
+    rows_per_batch : int or None, default None
+        Maximum rows per batch before flushing.
+    output_format : str, default "jsonl"
+        Output format to write.
+    gzipfile : bool, default False
+        Whether to gzip the output file.
+    delete_xml : bool, default False
+        Whether to delete the source XML file after conversion.
+    flat_attributes : bool, default False
+        Whether to flatten XML attributes into output.
+    flat_elements : bool, default False
+        Whether to flatten XML elements into output.
     """
 
     processed = False
@@ -498,36 +605,54 @@ def convert_xml_file(
 
 
 def convert_xml(
-    xsd_file=None,
-    max_recursion=2,
-    xml_path=None,
-    rows_per_batch=None,
-    multi=1,
-    output_format="jsonl",
-    output_path=None,
-    gzipfile=False,
-    no_overwrite=False,
-    delete_xml=False,
-    flatten=False,
-    log_level="INFO",
-    log_file=None,
-    xml_files=None,
-):
+    xsd_file: str | None = None,
+    max_recursion: int = 2,
+    xml_path: str | None = None,
+    rows_per_batch: int | None = None,
+    multi: int = 1,
+    output_format: str = "jsonl",
+    output_path: str | None = None,
+    gzipfile: bool = False,
+    no_overwrite: bool = False,
+    delete_xml: bool = False,
+    flatten: bool | str = False,
+    log_level: str = "INFO",
+    log_file: str | None = None,
+    xml_files: list[str] | None = None,
+) -> None:
     """
-    :param xsd_file: xsd file name
-    :param max_recursions:
-    :param xml_path: whether to parse a specific xml path
-    :param rows_per_batch:
-    :param multi: how many files to convert concurrently
-    :param output_format: jsonl or json
-    :param output_path: directory to save file
-    :param gzipfile: gzip saved file
-    :param no_overwrite: overwrite target file
-    :param delete_xml: optional delete xml file after converting
-    :param flatten:
-    :param log_level: stdout log messaging level
-    :param log_file: optional log file
-    :param xml_files: list of xml_files
+    Convert XML files based on an XSD schema.
+
+    Parameters
+    ----------
+    xsd_file : str or None, default None
+        Path to the XSD schema file.
+    max_recursion : int, default 2
+        Maximum recursion depth when converting schema elements.
+    xml_path : str or None, default None
+        Specific XML path to parse.
+    rows_per_batch : int or None, default None
+        Number of rows to process in each batch.
+    multi : int, default 1
+        Number of processes to use for parallel conversion.
+    output_format : str, default "jsonl"
+        Output format for converted files.
+    output_path : str or None, default None
+        Directory to save output files.
+    gzipfile : bool, default False
+        Whether to gzip the output files.
+    no_overwrite : bool, default False
+        Whether to skip existing output files.
+    delete_xml : bool, default False
+        Whether to delete source XML files after conversion.
+    flatten : bool or str, default False
+        Whether to flatten XML attributes or elements.
+    log_level : str, default "INFO"
+        Log level for stdout.
+    log_file : str or None, default None
+        Optional path to a log file.
+    xml_files : list[str] or None, default None
+        File patterns to process.
     """
 
     formatter = logging.Formatter(
@@ -657,18 +782,38 @@ def convert_xml(
 
 
 def to_pyarrow_batches(
-    xml_schema,
-    xml_file,
-    max_recursion=2,
-    flat_attributes=False,
-    flat_elements=False,
-    xml_path=None,
-    rows_per_batch=None,
-):
+    xml_schema: xmlschema.XMLSchema11,
+    xml_file: str | bytes | IO[bytes] | IO[str],
+    max_recursion: int = 2,
+    flat_attributes: bool = False,
+    flat_elements: bool = False,
+    xml_path: str | None = None,
+    rows_per_batch: int | None = None,
+) -> Iterator[pa.Array]:
     """
-    :param xml_schema: xml_schema
-    :param xml_file: xml file
-    :param xml_path: whether to parse a specific xml path
+    Yield PyArrow batches for the given XML input and schema.
+
+    Parameters
+    ----------
+    xml_schema : xmlschema.XMLSchema11
+        Parsed XML schema.
+    xml_file : str or file-like
+        XML input path or file-like object.
+    max_recursion : int, default 2
+        Maximum recursion depth for conversion.
+    flat_attributes : bool, default False
+        Whether to flatten XML attributes.
+    flat_elements : bool, default False
+        Whether to flatten XML elements.
+    xml_path : str or None, default None
+        Specific XML path to parse.
+    rows_per_batch : int or None, default None
+        Number of rows to process per batch.
+
+    Yields
+    ------
+    pyarrow.Array
+        Parsed batch of Arrow data.
     """
 
     processed = False
@@ -695,15 +840,40 @@ def to_pyarrow_batches(
         yield xml_arrow
 
 
-def to_pylist_batches(
-    xml_schema,
-    xml_file,
-    max_recursion=2,
-    flat_attributes=False,
-    flat_elements=False,
-    xml_path=None,
-    rows_per_batch=None,
-):
+def iter_dict(
+    xml_schema: xmlschema.XMLSchema11,
+    xml_file: str | bytes | IO[bytes] | IO[str],
+    max_recursion: int = 2,
+    flat_attributes: bool = False,
+    flat_elements: bool = False,
+    xml_path: str | None = None,
+    rows_per_batch: int | None = None,
+) -> Iterator[Any]:
+    """
+    Yield cleaned Python lists from XML-to-PyArrow batches.
+
+    Parameters
+    ----------
+    xml_schema : xmlschema.XMLSchema11
+        Parsed XML schema.
+    xml_file : str or file-like
+        XML input path or file-like object.
+    max_recursion : int, default 2
+        Maximum recursion depth for conversion.
+    flat_attributes : bool, default False
+        Whether to flatten XML attributes.
+    flat_elements : bool, default False
+        Whether to flatten XML elements.
+    xml_path : str or None, default None
+        Specific XML path to parse.
+    rows_per_batch : int or None, default None
+        Number of rows to process per batch.
+
+    Yields
+    ------
+    Any
+        Cleaned Python list representation.
+    """
 
     for xml_arrow in to_pyarrow_batches(
         xml_schema,
@@ -717,17 +887,40 @@ def to_pylist_batches(
         pylist = xml_arrow.to_pylist()
         pylist = remove_none_nested(pylist)
 
-        yield pylist
+        if pylist:
+            yield pylist[0]
 
+def to_struct(
+    xml_schema: xmlschema.XMLSchema11,
+    xml_file: str | bytes | IO[bytes] | IO[str],
+    max_recursion: int = 2,
+    flat_attributes: bool = False,
+    flat_elements: bool = False,
+    xml_path: str | None = None,
+) -> pa.Array | None:
+    """
+    Return the first PyArrow batch for the given XML input.
 
-def to_pyarrow(
-    xml_schema,
-    xml_file,
-    max_recursion=2,
-    flat_attributes=False,
-    flat_elements=False,
-    xml_path=None,
-):
+    Parameters
+    ----------
+    xml_schema : xmlschema.XMLSchema11
+        Parsed XML schema.
+    xml_file : str or file-like
+        XML input path or file-like object.
+    max_recursion : int, default 2
+        Maximum recursion depth for conversion.
+    flat_attributes : bool, default False
+        Whether to flatten XML attributes.
+    flat_elements : bool, default False
+        Whether to flatten XML elements.
+    xml_path : str or None, default None
+        Specific XML path to parse.
+
+    Returns
+    -------
+    pyarrow.Array or None
+        First batch of Arrow data if available.
+    """
     for batch in to_pyarrow_batches(
         xml_schema,
         xml_file,
@@ -740,14 +933,37 @@ def to_pyarrow(
         return batch
 
 
-def to_pylist(
-    xml_schema,
-    xml_file,
-    max_recursion=2,
-    flat_attributes=False,
-    flat_elements=False,
-    xml_path=None,
-):
+def to_dict(
+    xml_schema: xmlschema.XMLSchema11,
+    xml_file: str | bytes | IO[bytes] | IO[str],
+    max_recursion: int = 2,
+    flat_attributes: bool = False,
+    flat_elements: bool = False,
+    xml_path: str | None = None,
+) -> Any:
+    """
+    Return the first cleaned Python list from XML parsing.
+
+    Parameters
+    ----------
+    xml_schema : xmlschema.XMLSchema11
+        Parsed XML schema.
+    xml_file : str or file-like
+        XML input path or file-like object.
+    max_recursion : int, default 2
+        Maximum recursion depth for conversion.
+    flat_attributes : bool, default False
+        Whether to flatten XML attributes.
+    flat_elements : bool, default False
+        Whether to flatten XML elements.
+    xml_path : str or None, default None
+        Specific XML path to parse.
+
+    Returns
+    -------
+    Any
+        First cleaned Python list batch if available.
+    """
     for batch in to_pylist_batches(
         xml_schema,
         xml_file,
@@ -757,4 +973,7 @@ def to_pylist(
         xml_path,
         rows_per_batch=None,
     ):
-        return batch
+        if batch:
+            return batch[0]
+        else:
+            return None

@@ -22,17 +22,43 @@
 # SOFTWARE.
 
 
+from __future__ import annotations
+
 from datetime import datetime, time
 import isodate
 from decimal import Decimal
+from typing import Any, IO
+
 import pyarrow as pa
 import pyarrow.compute as pc
 
 from xmlwiz.mappings import ComputeType
+from xmlwiz.xsd_to_pyarrow import XmlElement
 
 
 # temporary function to use python instead of pyarrow.compute
-def xml_to_pyarrow(compute_type, data_vector, pyarrow_type):
+def xml_to_pyarrow(
+    compute_type: ComputeType,
+    data_vector: list[str],
+    pyarrow_type: pa.DataType,
+) -> pa.Array:
+    """
+    Convert XML element text values to a PyArrow array.
+
+    Parameters
+    ----------
+    compute_type : ComputeType
+        The computation type used to decode XML text.
+    data_vector : list[str]
+        Raw text values from XML elements.
+    pyarrow_type : pyarrow.DataType
+        Target PyArrow data type.
+
+    Returns
+    -------
+    pyarrow.Array
+        Converted Arrow array.
+    """
     # handles decoding element text to pyarrow data
     if compute_type == ComputeType.LIST:
         data_vector = [elem_text.split(" ") for elem_text in data_vector]
@@ -85,7 +111,24 @@ def xml_to_pyarrow(compute_type, data_vector, pyarrow_type):
     return data_vector
 
 
-def apply_facet(facet_name, vector, value):
+def apply_facet(facet_name: str, vector: pa.Array, value: Any) -> Any:
+    """
+    Apply an XSD facet to a PyArrow vector.
+
+    Parameters
+    ----------
+    facet_name : str
+        Name of the XSD facet.
+    vector : pyarrow.Array
+        Input Arrow vector.
+    value : Any
+        Facet value.
+
+    Returns
+    -------
+    Any
+        Result of applying the facet expression.
+    """
     # Signed Integers
     if facet_name == "maxExclusive":
         return pc.less(vector, value)
@@ -103,7 +146,15 @@ def apply_facet(facet_name, vector, value):
         return pc.replace_substring_regex(vector, pattern=r"\s", replacement="")
 
 
-def cast_vector_data(xpath_root):
+def cast_vector_data(xpath_root: XmlElement) -> None:
+    """
+    Cast XPath node data vectors to PyArrow arrays.
+
+    Parameters
+    ----------
+    xpath_root : XmlElement
+        Root element of the XPath tree.
+    """
 
     for xpath_elem in xpath_root.iter_elem():
         if xpath_elem.data_vector:
@@ -138,7 +189,15 @@ def cast_vector_data(xpath_root):
                     )
 
 
-def set_pyarrow_data(xpath_root):
+def set_pyarrow_data(xpath_root: XmlElement) -> None:
+    """
+    Build nested PyArrow structures from XPath tree data.
+
+    Parameters
+    ----------
+    xpath_root : XmlElement
+        Root element of the XPath tree.
+    """
 
     for xpath_elem in reversed(list(xpath_root.iter_elem())):
         if xpath_elem.data_counter == 0:
