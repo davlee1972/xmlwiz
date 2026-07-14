@@ -228,6 +228,7 @@ def parse_xml_file(
                 if skip_xpath == current_xpaths:
                     skip = False
             else:
+                elem.text = elem.text or ""
                 if xpath_elem.is_dict:
                     if xpath_elem.is_simple:
                         xpath_elem.children[elem.tag].data_vector.append(elem.text)
@@ -281,6 +282,8 @@ def parse_xml_file(
         cast_vector_data(xpath_root)
         set_pyarrow_data(xpath_root)
         yield xpath_root.data_pyarrow
+
+    xpath_root.clear_data()
 
 
 def open_gzip_file(gzipfile: bool, filename: str) -> IO[bytes]:
