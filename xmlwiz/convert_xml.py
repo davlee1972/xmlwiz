@@ -188,7 +188,7 @@ def parse_xml_file(
                     )
                     if missing_rows:
                         xpath_elem.data_vector.extend([None] * missing_rows)
-                        xpath_elem.data_counter = xpath_elem.data_counter
+                        xpath_elem.data_counter = xpath_elem.parent.data_counter
 
                 if xpath_elem.is_dict:
                     if xpath_elem.is_simple:
