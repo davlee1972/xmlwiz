@@ -158,7 +158,7 @@ def cast_vector_data(xpath_root: XmlElement) -> None:
 
     for xpath_elem in xpath_root.iter_elem():
         if xpath_elem.data_vector:
-            if xpath_elem.is_simple:
+            if xpath_elem.is_simple and not xpath_elem.is_dict:
                 if xpath_elem.casting_exp:
                     for compute_type in xpath_elem.casting_exp:
                         xpath_elem.data_pyarrow = xml_to_pyarrow(
@@ -171,18 +171,16 @@ def cast_vector_data(xpath_root: XmlElement) -> None:
                         xpath_elem.pyarrow_type
                     )
 
-                if not xpath_elem.is_list and xpath_elem.parent.data_counter != len(
+                missing_rows = xpath_elem.parent.data_counter - len(
                     xpath_elem.data_pyarrow
-                ):
+                )
+
+                if not xpath_elem.is_list and missing_rows:
                     xpath_elem.data_pyarrow = pa.concat_arrays(
                         [
                             xpath_elem.data_pyarrow,
                             pa.array(
-                                [None]
-                                * (
-                                    xpath_elem.parent.data_counter
-                                    - len(xpath_elem.data_pyarrow)
-                                ),
+                                [None] * missing_rows,
                                 type=xpath_elem.pyarrow_type,
                             ),
                         ]
@@ -212,16 +210,13 @@ def set_pyarrow_data(xpath_root: XmlElement) -> None:
             fields = []
             for k, v in xpath_elem.children.items():
                 if v.data_pyarrow:
-                    if xpath_elem.data_counter != len(v.data_pyarrow):
+                    missing_rows = xpath_elem.data_counter - len(v.data_pyarrow)
+                    if missing_rows:
                         v.data_pyarrow = pa.concat_arrays(
                             [
                                 v.data_pyarrow,
                                 pa.array(
-                                    [None]
-                                    * (
-                                        xpath_elem.data_counter
-                                        - len(v.data_pyarrow)
-                                    ),
+                                    [None] * missing_rows,
                                     type=v.data_pyarrow.type,
                                 ),
                             ]
@@ -237,7 +232,12 @@ def set_pyarrow_data(xpath_root: XmlElement) -> None:
                             )
                         )
 
-            data = pa.StructArray.from_arrays(arrays=data, fields=fields)
+            if xpath_elem.is_list:
+                data = pa.StructArray.from_arrays(arrays=data, fields=fields)
+            else:
+                data = pa.StructArray.from_arrays(
+                    arrays=data, fields=fields, mask=pa.array(xpath_elem.data_vector)
+                )
             xpath_elem.data_pyarrow = data
 
         if xpath_elem.is_list and xpath_elem.data_pyarrow:
@@ -251,5 +251,9 @@ def set_pyarrow_data(xpath_root: XmlElement) -> None:
                 + [xpath_elem.data_offsets[-1]],
                 xpath_elem.data_pyarrow,
             )
+
+            if not xpath_elem.nullable:
+                empty_value = pa.scalar([], type=data.type)
+                data = pc.fill_null(data, empty_value)
 
             xpath_elem.data_pyarrow = data
