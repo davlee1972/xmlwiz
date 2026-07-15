@@ -211,7 +211,8 @@ def set_pyarrow_data(xpath_root: XmlElement) -> None:
             for k, v in xpath_elem.children.items():
                 if v.data_pyarrow:
                     missing_rows = xpath_elem.data_counter - len(v.data_pyarrow)
-                    if missing_rows and v.is_dict:
+                    #if missing_rows:
+                    if missing_rows:
                         v.data_pyarrow = pa.concat_arrays(
                             [
                                 v.data_pyarrow,
