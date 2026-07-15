@@ -271,7 +271,8 @@ class XmlElement:
                     child_elem.field_name = (
                         xpath_elem.name.removesuffix("attributes") + child_elem.name
                     )
-                    child_elem.nullable = xpath_elem.parent.nullable
+                    if xpath_elem.parent.nullable:
+                        child_elem.nullable = True
 
     def flatten_elements(self) -> None:
         """
@@ -290,10 +291,7 @@ class XmlElement:
                     if child == xpath_elem.name + "@attributes":
                         # add all child items
                         child_attributes = True
-                        if child_elem.field_flat:
-                            continue
-                        else:
-                            break
+                        continue
                     # return if there are two items found
                     if skip_to_elem:
                         skip_to_elem = None
@@ -303,6 +301,13 @@ class XmlElement:
                 if child_attributes:
                     # add all child items as replacement
                     xpath_elem.field_flat = True
+                    if skip_to_elem:
+                        skip_to_elem.field_name = xpath_elem.field_name
+                        if xpath_elem.nullable:
+                            skip_to_elem.nullable = True
+                            xpath_elem.children[
+                                xpath_elem.name + "@attributes"
+                            ].nullable = True
                 elif skip_to_elem:
                     # replace item with skip to element
                     xpath_elem.field_flat = skip_to_elem
@@ -452,7 +457,9 @@ def pyarrow_numeric(xsd_type: Any) -> pa.DataType:
         return pa.int64()
 
 
-def map_xsd_simple_type_to_arrow(xsd_type: Any) -> tuple[pa.DataType, list[ComputeType], list[pc.Expression]]:
+def map_xsd_type_to_arrow(
+    xsd_type: Any,
+) -> tuple[pa.DataType, list[ComputeType], list[pc.Expression]]:
     """
     Map a simple XSD type to an Arrow type and casting expressions.
 
@@ -474,12 +481,13 @@ def map_xsd_simple_type_to_arrow(xsd_type: Any) -> tuple[pa.DataType, list[Compu
     casting_exp = []
     validation_exp = []
 
-    if xsd_type.is_restriction():
-        local_name = xsd_type.base_type.local_name
-        base_type = xsd_type.base_type
-    else:
+    # if xsd_type.is_restriction():
+    if xsd_type.is_simple():
         local_name = xsd_type.local_name
         base_type = xsd_type
+    else:
+        local_name = xsd_type.base_type.local_name
+        base_type = xsd_type.base_type
 
     if base_type.is_list():
         local_name = base_type.item_type.local_name
@@ -529,9 +537,7 @@ def convert_xsd_elem(
         is_list = False
 
     if elem.type.is_simple():
-        pyarrow_type, casting_exp, validation_exp = map_xsd_simple_type_to_arrow(
-            elem.type
-        )
+        pyarrow_type, casting_exp, validation_exp = map_xsd_type_to_arrow(elem.type)
 
         xpath_elem.add_child(
             elem.local_name,
@@ -550,8 +556,8 @@ def convert_xsd_elem(
         if hasattr(elem.type, "attributes"):
             attributes_nullable = False
             for attr in elem.type.attributes.values():
-                pyarrow_type, casting_exp, validation_exp = (
-                    map_xsd_simple_type_to_arrow(attr.type)
+                pyarrow_type, casting_exp, validation_exp = map_xsd_type_to_arrow(
+                    attr.type
                 )
                 attr_nullable = attr.use == "optional"
                 if attr_nullable:
@@ -566,9 +572,7 @@ def convert_xsd_elem(
 
         # 2. Process Simple Content
         if elem.type.has_simple_content():
-            pyarrow_type, casting_exp, validation_exp = map_xsd_simple_type_to_arrow(
-                elem.type
-            )
+            pyarrow_type, casting_exp, validation_exp = map_xsd_type_to_arrow(elem.type)
             if attr_fields:
                 # add simple list of dict for attributes and elements
                 parent_xpath_elem = xpath_elem.add_child(
@@ -667,8 +671,8 @@ def convert_xsd_elem(
                     )
 
             if elem.type.has_mixed_content():
-                pyarrow_type, casting_exp, validation_exp = (
-                    map_xsd_simple_type_to_arrow(elem.type)
+                pyarrow_type, casting_exp, validation_exp = map_xsd_type_to_arrow(
+                    elem.type
                 )
                 # add simple type for element value
                 parent_xpath_elem.add_child(

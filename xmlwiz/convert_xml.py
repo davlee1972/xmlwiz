@@ -125,6 +125,7 @@ def parse_xml_file(
     """
 
     xpath_root.data_counter = 1
+    xpath_root.data_vector = [False]
 
     xpath_elem = xpath_root
 
@@ -157,30 +158,37 @@ def parse_xml_file(
                 skip = False
                 xpath_elem = xpath_elem.children[elem.tag]
                 xpath_elem.data_counter += 1
+
                 if xpath_elem.is_list:
                     # add missing offsets to match parent
-                    if len(xpath_elem.data_offsets) != xpath_elem.parent.data_counter:
+                    missing_offsets = xpath_elem.parent.data_counter - len(
+                        xpath_elem.data_offsets
+                    )
+                    if missing_offsets:
                         xpath_elem.data_offsets = (
                             xpath_elem.data_offsets[:-1]
-                            + [None]
-                            * (
-                                xpath_elem.parent.data_counter
-                                - len(xpath_elem.data_offsets)
-                            )
+                            + [None] * missing_offsets
                             + [xpath_elem.data_offsets[-1]]
                         )
-                else:
+
+                elif xpath_elem.is_dict:
                     # current data counter is short compared to parent
-                    if xpath_elem.data_counter != xpath_elem.parent.data_counter:
+                    missing_rows = (
+                        xpath_elem.parent.data_counter - xpath_elem.data_counter
+                    )
+                    if missing_rows:
                         # add missing rows as None
-                        if xpath_elem.is_simple and not xpath_elem.is_dict:
-                            missing_rows = (
-                                xpath_elem.parent.data_counter - xpath_elem.data_counter
-                            )
-                            if missing_rows:
-                                xpath_elem.data_vector.extend([None] * missing_rows)
-                        # reset counter to match parent
+                        xpath_elem.data_vector.extend([True] * missing_rows)
                         xpath_elem.data_counter = xpath_elem.parent.data_counter
+                    xpath_elem.data_vector.append(False)
+
+                elif xpath_elem.is_simple:
+                    missing_rows = (
+                        xpath_elem.parent.data_counter - xpath_elem.data_counter
+                    )
+                    if missing_rows:
+                        xpath_elem.data_vector.extend([None] * missing_rows)
+                        xpath_elem.data_counter = xpath_elem.data_counter
 
                 if xpath_elem.is_dict:
                     if xpath_elem.is_simple:
@@ -203,7 +211,15 @@ def parse_xml_file(
                         # Lxml will include stuff like xlms and xsi items in attributes which we don't want.
                         try:
                             attr_group = xpath_elem.children[elem.tag + "@attributes"]
-                            attr_group.data_counter = xpath_elem.data_counter
+                            attr_group.data_counter += 1
+                            missing_rows = (
+                                xpath_elem.data_counter - attr_group.data_counter
+                            )
+                            if missing_rows:
+                                attr_group.data_vector.extend([True] * missing_rows)
+                                attr_group.data_counter = xpath_elem.data_counter
+                            attr_group.data_vector.append(False)
+
                             for attr_tag, attr_text in elem.attrib.items():
                                 attr_tag = etree.QName(attr_tag).localname
 
@@ -892,6 +908,7 @@ def iter_dict(
 
         if pylist:
             yield pylist[0]
+
 
 def to_struct(
     xml_schema: xmlschema.XMLSchema11,
