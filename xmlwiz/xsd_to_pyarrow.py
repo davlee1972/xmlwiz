@@ -499,7 +499,7 @@ def map_xsd_type_to_arrow(
 
     pyarrow_type = XSD_TO_PYARROW.get(local_name, pa.string())
     if pyarrow_type == "numeric":
-        pyarrow_type = pyarrow_numeric(xsd_type)
+        pyarrow_type = pyarrow_numeric(base_type)
 
     return (
         pyarrow_type,
