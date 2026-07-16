@@ -125,7 +125,6 @@ def parse_xml_file(
     """
 
     xpath_root.data_counter = 1
-    xpath_root.data_vector = [False]
 
     xpath_elem = xpath_root
 
@@ -173,14 +172,7 @@ def parse_xml_file(
 
                 elif xpath_elem.is_dict:
                     # current data counter is short compared to parent
-                    missing_rows = (
-                        xpath_elem.parent.data_counter - xpath_elem.data_counter
-                    )
-                    if missing_rows:
-                        # add missing rows as None
-                        xpath_elem.data_vector.extend([True] * missing_rows)
-                        xpath_elem.data_counter = xpath_elem.parent.data_counter
-                    xpath_elem.data_vector.append(False)
+                    xpath_elem.data_counter = xpath_elem.parent.data_counter
 
                 elif xpath_elem.is_simple:
                     missing_rows = (
@@ -211,14 +203,7 @@ def parse_xml_file(
                         # Lxml will include stuff like xlms and xsi items in attributes which we don't want.
                         try:
                             attr_group = xpath_elem.children[elem.tag + "@attributes"]
-                            attr_group.data_counter += 1
-                            missing_rows = (
-                                xpath_elem.data_counter - attr_group.data_counter
-                            )
-                            if missing_rows:
-                                attr_group.data_vector.extend([True] * missing_rows)
-                                attr_group.data_counter = xpath_elem.data_counter
-                            attr_group.data_vector.append(False)
+                            attr_group.data_counter = xpath_elem.data_counter
 
                             for attr_tag, attr_text in elem.attrib.items():
                                 attr_tag = etree.QName(attr_tag).localname

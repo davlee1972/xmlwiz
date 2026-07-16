@@ -481,13 +481,18 @@ def map_xsd_type_to_arrow(
     casting_exp = []
     validation_exp = []
 
+    local_name = xsd_type.local_name
+    base_type = xsd_type
+
     # if xsd_type.is_restriction():
-    if xsd_type.is_simple():
-        local_name = xsd_type.local_name
-        base_type = xsd_type
-    else:
-        local_name = xsd_type.base_type.local_name
-        base_type = xsd_type.base_type
+    while True:
+        if local_name in XSD_TO_PYARROW:
+            break
+        if hasattr(base_type, "base_type") and base_type.base_type:
+            base_type = base_type.base_type
+            local_name = base_type.local_name
+        else:
+            break
 
     if base_type.is_list():
         local_name = base_type.item_type.local_name
