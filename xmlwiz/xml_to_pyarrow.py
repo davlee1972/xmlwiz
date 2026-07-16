@@ -156,6 +156,7 @@ def fill_nulls_with_dummy(arr: pa.Array) -> pa.Array:
         pa.types.is_integer(data_type)
         or pa.types.is_floating(data_type)
         or pa.types.is_decimal(data_type)
+        or pa.types.is_duration(data_type)
     ):
         dummy_val = Ө
     elif pa.types.is_string(data_type) or pa.types.is_binary(data_type):
@@ -164,6 +165,10 @@ def fill_nulls_with_dummy(arr: pa.Array) -> pa.Array:
         dummy_val = datetime(1970, 1, 1)
     elif pa.types.is_date(data_type):
         dummy_val = date(1970, 1, 1)
+    elif pa.types.is_list(data_type):
+        dummy_val = []
+    elif pa.types.is_struct(data_type):
+        dummy_val = {}
     else:
         raise ValueError(str(data_type) + "is not supported yet.")
 
