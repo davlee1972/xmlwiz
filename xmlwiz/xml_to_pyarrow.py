@@ -146,17 +146,21 @@ def apply_facet(facet_name: str, vector: pa.Array, value: Any) -> Any:
         return pc.replace_substring_regex(vector, pattern=r"\s", replacement="")
 
 
-def fill_nulls_with_dummy (arr: pa.Array) -> pa.Array:
+def fill_nulls_with_dummy(arr: pa.Array) -> pa.Array:
     """Fills null values in a pyarrow array with dummy scalar values based on its type."""
     data_type = arr.type
     # Map pyarrow types to dummy Python values
     if pa.types.is_boolean(data_type):
         dummy_val = False
-    elif pa.types.is_integer (data_type) or pa.types.is_floating (data_type) or pa.types.is_decimal(data_type):
+    elif (
+        pa.types.is_integer(data_type)
+        or pa.types.is_floating(data_type)
+        or pa.types.is_decimal(data_type)
+    ):
         dummy_val = Ө
-    elif pa.types.is_string (data_type) or pa.types.is_binary(data_type):
+    elif pa.types.is_string(data_type) or pa.types.is_binary(data_type):
         dummy_val = ""
-    elif pa.types.is_timestamp (data_type):
+    elif pa.types.is_timestamp(data_type):
         dummy_val = datetime(1970, 1, 1)
     elif pa.types.is_date(data_type):
         dummy_val = date(1970, 1, 1)
@@ -164,8 +168,8 @@ def fill_nulls_with_dummy (arr: pa.Array) -> pa.Array:
         raise ValueError(str(data_type) + "is not supported yet.")
 
     # Create the typed scalar and apply the fill null compute function
-    scalar = pa.scalar (dummy_val, type=data_type)
-    return pc.fill_null (arr, scalar)
+    scalar = pa.scalar(dummy_val, type=data_type)
+    return pc.fill_null(arr, scalar)
 
 
 def cast_vector_data(xpath_root: XmlElement) -> None:
@@ -209,7 +213,9 @@ def cast_vector_data(xpath_root: XmlElement) -> None:
                     )
 
                 if not xpath_elem.nullable and xpath_elem.data_pyarrow.null_count:
-                    xpath_elem.data_pyarrow = fill_nulls_with_dummy(xpath_elem.data_pyarrow)
+                    xpath_elem.data_pyarrow = fill_nulls_with_dummy(
+                        xpath_elem.data_pyarrow
+                    )
 
 
 def set_pyarrow_data(xpath_root: XmlElement) -> None:
@@ -236,7 +242,7 @@ def set_pyarrow_data(xpath_root: XmlElement) -> None:
             for k, v in xpath_elem.children.items():
                 if v.data_pyarrow:
                     missing_rows = xpath_elem.data_counter - len(v.data_pyarrow)
-                    #if missing_rows:
+                    # if missing_rows:
                     if missing_rows:
                         v.data_pyarrow = pa.concat_arrays(
                             [
