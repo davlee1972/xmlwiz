@@ -158,7 +158,7 @@ def fill_nulls_with_dummy(arr: pa.Array) -> pa.Array:
         or pa.types.is_decimal(data_type)
         or pa.types.is_duration(data_type)
     ):
-        dummy_val = Ө
+        dummy_val = 0
     elif pa.types.is_string(data_type) or pa.types.is_binary(data_type):
         dummy_val = ""
     elif pa.types.is_timestamp(data_type):
