@@ -302,7 +302,8 @@ class XmlElement:
                     # add all child items as replacement
                     xpath_elem.field_flat = True
                     if skip_to_elem:
-                        skip_to_elem.field_name = xpath_elem.field_name
+                        if xpath_elem.is_dict and skip_to_elem.is_dict:
+                            skip_to_elem.field_name = xpath_elem.field_name
                         if xpath_elem.nullable:
                             skip_to_elem.nullable = True
                             xpath_elem.children[
