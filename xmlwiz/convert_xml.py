@@ -349,10 +349,11 @@ def write_json(
     rows_per_batch: int | None,
     gzipfile: bool,
     output_format: str,
+    func_add_columns = None
 ) -> bool:
 
     def write_xml_to_json(
-        xml_file: str | bytes | IO[bytes] | IO[str], processed: bool
+        xml_file: str | bytes | IO[bytes] | IO[str], processed: bool, extra_columns: dict | None
     ) -> bool:
         """
         Convert XML data from a file-like object to JSON output.
@@ -379,6 +380,8 @@ def write_json(
             pylist = remove_none_nested(pylist)
 
             for row in pylist:
+                if extra_columns:
+                    row = extra_columns | row
                 xml_json = json.dumps(row, default=json_decoder)
                 if len(xml_json) > 0:
                     if not processed:
@@ -391,6 +394,11 @@ def write_json(
                             file_obj.write(bytes(os.linesep + xml_json, "utf-8"))
         return processed
 
+    if func_add_columns:
+        extra_columns = func_add_columns(input_file)
+    else:
+        extra_columns = None
+
     with open_gzip_file(gzipfile, output_file) as file_obj:
         if output_format == "json":
             file_obj.write(bytes("[" + os.linesep, "utf-8"))
@@ -401,7 +409,7 @@ def write_json(
 
             for member in tar_file_list:
                 with tar_file.extractfile(member) as xml_file:
-                    processed = write_xml_to_json(xml_file, processed)
+                    processed = write_xml_to_json(xml_file, processed, extra_columns)
 
         elif input_file.endswith(".zip"):
             zip_file = ZipFile(input_file, "r")
@@ -409,14 +417,14 @@ def write_json(
 
             for i in range(len(zip_file_list)):
                 with zip_file.open(zip_file_list[i].filename) as xml_file:
-                    processed = write_xml_to_json(xml_file, processed)
+                    processed = write_xml_to_json(xml_file, processed, extra_columns)
 
         elif input_file.endswith(".gz"):
             with gzip.open(input_file) as xml_file:
-                processed = write_xml_to_json(xml_file, processed)
+                processed = write_xml_to_json(xml_file, processed, extra_columns)
 
         else:
-            processed = write_xml_to_json(input_file, processed)
+            processed = write_xml_to_json(input_file, processed, extra_columns)
 
         if output_format == "json":
             file_obj.write(bytes(os.linesep + "]", "utf-8"))
@@ -431,6 +439,7 @@ def write_parquet(
     xpaths: list[str] | None,
     processed: bool,
     rows_per_batch: int | None,
+    func_add_columns = None
 ) -> bool:
 
     ctx = df.SessionContext()
@@ -440,7 +449,7 @@ def write_parquet(
     pyarrow_schema = pa.schema(schema_type)
 
     def write_xml_to_parquet(
-        xml_file: str | bytes | IO[bytes] | IO[str], processed: bool
+        xml_file: str | bytes | IO[bytes] | IO[str], processed: bool, extras: pa.Table | None
     ) -> bool:
         """
         Convert XML data from a file-like object into Parquet output.
@@ -466,7 +475,14 @@ def write_parquet(
 
             table = pa.Table.from_struct_array(xml_arrow)
 
-            if len(table) > 0:
+            n_rows = table.num_rows
+
+            if n_rows > 0:
+                if extras:
+                    for i, column in enumerate(extras.itercolumns()):
+                        new_column = pa.repeat(column[0], n_rows)
+                        table = table.add_column(i, extras.schema[i].name, new_column)
+
                 # writer.write_table(table)
                 df_table = ctx.from_arrow(table)
                 temp_file = os.path.join(temp_dir, "temp_" + output_file)
@@ -479,6 +495,13 @@ def write_parquet(
 
         return processed
 
+    if func_add_columns:
+        extra_columns = func_add_columns(input_file)
+        extras = pa.Table.from_pylist([extra_columns])
+        pyarrow_schema = pa.unify_schemas([extras.schema, pyarrow_schema])
+    else:
+        extras = None
+
     with pq.ParquetWriter(output_file, pyarrow_schema) as writer:
         if input_file.endswith(".tar.gz"):
             gzip_file = tarfile.open(input_file, "r")
@@ -486,7 +509,7 @@ def write_parquet(
 
             for member in gzip_file_list:
                 with gzip_file.extractfile(member) as xml_file:
-                    processed = write_xml_to_parquet(xml_file, processed)
+                    processed = write_xml_to_parquet(xml_file, processed, extras)
 
         elif input_file.endswith(".zip"):
             zip_file = ZipFile(input_file, "r")
@@ -494,14 +517,14 @@ def write_parquet(
 
             for i in range(len(zip_file_list)):
                 with zip_file.open(zip_file_list[i].filename) as xml_file:
-                    processed = write_xml_to_parquet(xml_file, processed)
+                    processed = write_xml_to_parquet(xml_file, processed, extras)
 
         elif input_file.endswith(".gz"):
             with gzip.open(input_file) as xml_file:
-                processed = write_xml_to_parquet(xml_file, processed)
+                processed = write_xml_to_parquet(xml_file, processed, extras)
 
         else:
-            processed = write_xml_to_parquet(input_file, processed)
+            processed = write_xml_to_parquet(input_file, processed, extras)
 
         return processed
 
@@ -519,6 +542,7 @@ def convert_xml_file(
     delete_xml: bool = False,
     flat_attributes: bool = False,
     flat_elements: bool = False,
+    func_add_columns = None
 ) -> None:
     """
     Convert a single XML file to JSON or Parquet output.
@@ -584,6 +608,7 @@ def convert_xml_file(
             rows_per_batch,
             gzipfile,
             output_format,
+            func_add_columns,
         )
 
     elif output_format in ["parquet"]:
@@ -594,6 +619,7 @@ def convert_xml_file(
             xpaths,
             processed,
             rows_per_batch,
+            func_add_columns,
         )
 
     # Remove output file if no data is generated
@@ -623,6 +649,7 @@ def convert_xml(
     log_level: str = "INFO",
     log_file: str | None = None,
     xml_files: list[str] | None = None,
+    func_add_columns = None
 ) -> None:
     """
     Convert XML files based on an XSD schema.
@@ -761,6 +788,7 @@ def convert_xml(
                     delete_xml,
                     flat_attributes,
                     flat_elements,
+                    func_add_columns,
                 ),
                 error_callback=_logger.info,
             )
@@ -778,6 +806,7 @@ def convert_xml(
                 delete_xml,
                 flat_attributes,
                 flat_elements,
+                func_add_columns,
             )
 
     if multi > 1:
