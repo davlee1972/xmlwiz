@@ -179,8 +179,9 @@ def parse_xml_file(
                         xpath_elem.parent.data_counter - xpath_elem.data_counter
                     )
                     if missing_rows:
-                        xpath_elem.data_vector.extend([None] * missing_rows)
+                        xpath_elem.data_offsets.extend([None] * missing_rows)
                         xpath_elem.data_counter = xpath_elem.parent.data_counter
+                    xpath_elem.data_offsets.append(len(xpath_elem.data_vector))
 
                 if xpath_elem.is_dict:
                     if xpath_elem.is_simple:
@@ -188,16 +189,18 @@ def parse_xml_file(
                         child_elem.data_counter += 1
                         missing_rows = xpath_elem.data_counter - child_elem.data_counter
                         if missing_rows:
-                            child_elem.data_vector.extend([None] * missing_rows)
+                            child_elem.data_offsets.extend([None] * missing_rows)
                             child_elem.data_counter = xpath_elem.data_counter
+                        child_elem.data_offsets.append(len(child_elem.data_vector))
 
                     if elem.tag + "@tail" in xpath_elem.children:
                         tail_elem = xpath_elem.children[elem.tag + "@tail"]
                         tail_elem.data_counter += 1
                         missing_rows = xpath_elem.data_counter - tail_elem.data_counter
                         if missing_rows:
-                            tail_elem.data_vector.extend([None] * missing_rows)
+                            tail_elem.data_offsets.extend([None] * missing_rows)
                             tail_elem.data_counter = xpath_elem.data_counter
+                        tail_elem.data_offsets.append(len(tail_elem.data_vector))
 
                     if elem.attrib:
                         # Lxml will include stuff like xlms and xsi items in attributes which we don't want.
@@ -214,8 +217,11 @@ def parse_xml_file(
                                     attr_group.data_counter - attribute.data_counter
                                 )
                                 if missing_rows > 0:
-                                    attribute.data_vector.extend([None] * missing_rows)
+                                    attribute.data_offsets.extend([None] * missing_rows)
                                     attribute.data_counter = attr_group.data_counter
+                                attribute.data_offsets.append(
+                                    len(attribute.data_vector)
+                                )
                                 attribute.data_vector.append(attr_text)
                         except:
                             pass
@@ -349,11 +355,13 @@ def write_json(
     rows_per_batch: int | None,
     gzipfile: bool,
     output_format: str,
-    func_add_columns = None
+    func_add_columns=None,
 ) -> bool:
 
     def write_xml_to_json(
-        xml_file: str | bytes | IO[bytes] | IO[str], processed: bool, extra_columns: dict | None
+        xml_file: str | bytes | IO[bytes] | IO[str],
+        processed: bool,
+        extra_columns: dict | None,
     ) -> bool:
         """
         Convert XML data from a file-like object to JSON output.
@@ -439,7 +447,7 @@ def write_parquet(
     xpaths: list[str] | None,
     processed: bool,
     rows_per_batch: int | None,
-    func_add_columns = None
+    func_add_columns=None,
 ) -> bool:
 
     ctx = df.SessionContext()
@@ -449,7 +457,9 @@ def write_parquet(
     pyarrow_schema = pa.schema(schema_type)
 
     def write_xml_to_parquet(
-        xml_file: str | bytes | IO[bytes] | IO[str], processed: bool, extras: pa.Table | None
+        xml_file: str | bytes | IO[bytes] | IO[str],
+        processed: bool,
+        extras: pa.Table | None,
     ) -> bool:
         """
         Convert XML data from a file-like object into Parquet output.
@@ -542,7 +552,7 @@ def convert_xml_file(
     delete_xml: bool = False,
     flat_attributes: bool = False,
     flat_elements: bool = False,
-    func_add_columns = None
+    func_add_columns=None,
 ) -> None:
     """
     Convert a single XML file to JSON or Parquet output.
@@ -649,7 +659,7 @@ def convert_xml(
     log_level: str = "INFO",
     log_file: str | None = None,
     xml_files: list[str] | None = None,
-    func_add_columns = None
+    func_add_columns=None,
 ) -> None:
     """
     Convert XML files based on an XSD schema.

@@ -57,7 +57,7 @@ class XmlElement:
     field_flat: bool | XmlElement = False
 
     data_vector: list[str] = field(default_factory=list)
-    data_offsets: list[int | None] = field(default_factory=lambda: [0])
+    data_offsets: list[int | None] = field(default_factory=list)
     data_counter: int = 0
     data_pyarrow: pa.Array = None
 
@@ -216,7 +216,10 @@ class XmlElement:
         """
         for elem in self.iter_elem():
             elem.data_vector = []
-            elem.data_offsets = [0]
+            if elem.is_list:
+                elem.data_offsets = [0]
+            else:
+                elem.data_offsets = []
             elem.data_counter = 0
             elem.data_pyarrow = None
 
@@ -775,6 +778,8 @@ def convert_xsd_to_xpath_tree(xsd_schema: Any, max_recursion: int = 2) -> XmlEle
     if len(xpath_root.children) > 1:
         for child_elem in xpath_root.children.values():
             child_elem.nullable = True
+
+    xpath_root.clear_data()
 
     return xpath_root
 

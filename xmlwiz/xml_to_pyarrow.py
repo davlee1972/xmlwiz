@@ -202,19 +202,16 @@ def cast_vector_data(xpath_root: XmlElement) -> None:
                         xpath_elem.pyarrow_type
                     )
 
-                missing_rows = xpath_elem.parent.data_counter - len(
-                    xpath_elem.data_pyarrow
-                )
+                if not xpath_elem.is_list:
+                    missing_rows = (
+                        xpath_elem.parent.data_counter - xpath_elem.data_counter
+                    )
+                    if missing_rows:
+                        xpath_elem.data_offsets.extend([None] * missing_rows)
 
-                if not xpath_elem.is_list and missing_rows:
-                    xpath_elem.data_pyarrow = pa.concat_arrays(
-                        [
-                            xpath_elem.data_pyarrow,
-                            pa.array(
-                                [None] * missing_rows,
-                                type=xpath_elem.pyarrow_type,
-                            ),
-                        ]
+                    xpath_elem.data_pyarrow = pc.take(
+                        xpath_elem.data_pyarrow,
+                        pa.array(xpath_elem.data_offsets, type=pa.int64()),
                     )
 
                 if not xpath_elem.nullable and xpath_elem.data_pyarrow.null_count:
